@@ -6,6 +6,11 @@
 #include <cmath>
 #include <vector>
 
+// The implementation headers live here, not in StFcsMLCategoryMaker.h - CINT
+// cannot parse them and rootcint would fail while building the dictionary.
+#include "StFcsClusterFeatures.h"
+#include "StFcsMLP.h"
+
 #include "StEvent/StEnumerations.h"
 #include "StEvent/StEvent.h"
 #include "StEvent/StFcsCluster.h"
@@ -22,14 +27,40 @@
 
 using namespace StFcsClusterFeatures;
 
+// keep the CINT-safe copy of the array size honest
+#if __cplusplus >= 201103L || defined(__GXX_EXPERIMENTAL_CXX0X__)
+static_assert(StFcsMLCategoryMaker::kNVarMax == StFcsClusterFeatures::kNVarMax,
+              "StFcsMLCategoryMaker::kNVarMax must match StFcsClusterFeatures::kNVarMax");
+#endif
+
 #ifndef SKIPDefImp
 ClassImp(StFcsMLCategoryMaker)
 #endif
 
-    StFcsMLCategoryMaker::StFcsMLCategoryMaker(const Char_t* name) : StMaker(name) {}
+    StFcsMLCategoryMaker::StFcsMLCategoryMaker(const Char_t* name)
+    : StMaker(name),
+      mFcsDb(0),
+      mFcsColl(0),
+      mFeatureSet(13),
+      mBackend(kTMVA),
+      mWeightFile("weights/FcsCat13_BDTG.weights.xml"),
+      mTMVAMethod("BDTG"),
+      mQaFile(""),
+      mMode(kOverride),
+      mConfidence(0.7),
+      mEmin(0.5),
+      mNCluster(0),
+      mNChanged(0),
+      h2_catStar_vs_catML(0),
+      mReader(0),
+      mNet(0) {
+   for (int i = 0; i < kNVarMax; i++) mVar[i] = 0.0;
+   for (int i = 0; i < 3; i++) h1_prob[i] = 0;
+}
 
 StFcsMLCategoryMaker::~StFcsMLCategoryMaker() {
    if (mReader) delete mReader;
+   if (mNet) delete mNet;
 }
 
 //-----------------------------------------------------------------------------
@@ -95,13 +126,14 @@ Int_t StFcsMLCategoryMaker::Init() {
       }
       LOG_INFO << "StFcsMLCategoryMaker: TMVA method " << mTMVAMethod << " from " << mWeightFile << endm;
    } else {
-      if (!mNet.load(mWeightFile.c_str())) {
+      mNet = new StFcsMLP();
+      if (!mNet->load(mWeightFile.c_str())) {
          LOG_ERROR << "StFcsMLCategoryMaker::Init failed to load " << mWeightFile << endm;
          return kStFatal;
       }
-      if (mNet.nOutput() != 3 || mNet.nInput() != nv) {
-         LOG_ERROR << "StFcsMLCategoryMaker::Init model shape mismatch: nin=" << mNet.nInput()
-                   << " nout=" << mNet.nOutput() << " expected " << nv << " and 3" << endm;
+      if (mNet->nOutput() != 3 || mNet->nInput() != nv) {
+         LOG_ERROR << "StFcsMLCategoryMaker::Init model shape mismatch: nin=" << mNet->nInput()
+                   << " nout=" << mNet->nOutput() << " expected " << nv << " and 3" << endm;
          return kStFatal;
       }
    }
@@ -147,7 +179,7 @@ Int_t StFcsMLCategoryMaker::Make() {
             for (int i = 0; i < 3; i++) p[i] = r[i];
          } else {
             std::vector<float> in(f, f + nv);
-            const std::vector<float> r = mNet.eval(in);
+            const std::vector<float> r = mNet->eval(in);
             if (r.size() != 3) continue;
             for (int i = 0; i < 3; i++) p[i] = r[i];
          }
