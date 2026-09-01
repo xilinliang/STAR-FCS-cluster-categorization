@@ -70,6 +70,7 @@ class StFcsClusterFeatureMaker : public StMaker {
    Float_t bChi2Ndf1, bChi2Ndf2;            // from StFcsPointMaker, 0 if it did not run
    Int_t bSeedId, bSeedRow, bSeedCol;
    Float_t bSeedE, bSeedFrac, bE2Frac, bE1e2Frac;
+   Float_t bXW, bYW;                        // cell width [cm], so nothing downstream hardcodes it
    Float_t bSigX, bSigY, bSigXY;            // energy-weighted second moments, cell units
    Float_t bImg[kNPix];                     // energies in the window, seed at the centre
    Float_t bMask[kNPix];                    // 1 if that tower belongs to THIS cluster

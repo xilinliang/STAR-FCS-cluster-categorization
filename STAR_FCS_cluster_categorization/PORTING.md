@@ -41,8 +41,9 @@ Note the first assignment falls through and is overwritten unconditionally, so
 the effective STAR categorizer today is sigma-only; `nTowers < 5` does nothing.
 Worth confirming against the version of `StFcsClusterMaker` in your library
 before you quote it — and worth a line in your talk, because it is part of the
-baseline you will be measured against. `python/star_features.py::star_baseline`
-reproduces both variants.
+baseline you will be measured against. You do not have to reimplement it: the
+feature dumper stores whatever `StFcsClusterMaker` decided in the `catStar`
+branch, so the baseline is one branch away in every comparison.
 
 ## 2. What maps onto what
 
@@ -69,30 +70,94 @@ Two gotchas that cost people a day each:
 ```
 StRoot/StFcsClusterFeatureMaker/   dump one tree entry per ECal cluster
 StRoot/StFcsMLCategoryMaker/       apply the trained model, set category()
-  └ StFcsMLP.h                     dependency-free dense-net evaluator (2nd backend)
+  ├ StFcsClusterFeatures.h         THE definition of the input variables
+  └ StFcsMLP.h                     dense-net evaluator (non-TMVA backend only)
 trainTMVA.C                        TMVA multiclass training on the dumped tree
+testFeatures.C                     smoke test for the feature definitions
 runMudst_ml.C                      your runMudst.C with both makers wired in
-python/star_features.py            same 13 features, in numpy, + truth labels
-python/export_weights.py           sklearn/PyTorch → StFcsMLP text format
+BUILD.md                           SL7 container, cons, and job submission
+optional_python/                   numpy reader + PyTorch exporter, not needed
 ```
 
-Drop the two `StRoot/` directories into your working folder next to
-`StFcsPi0FinderForEcal`, then `stardev; cons`.
+Pure C++/ROOT — nothing to install, TMVA comes with ROOT. See `BUILD.md` for the
+container and `cons` details. Drop the two `StRoot/` directories into your
+working folder next to `StFcsPi0FinderForEcal` and build.
 
-**The 13-feature vector is a contract.** It is defined in three places that must
-never drift: `StFcsMLCategoryMaker::features()`, `star_features.build_features()`,
-and the `varname[]` list in `trainTMVA.C`. Names matter too — TMVA matches
-training to application by variable *name*.
+### The input variables
+
+Defined once, in `StFcsClusterFeatures.h`. Both `trainTMVA.C` and
+`StFcsMLCategoryMaker` include that header and call the same `compute()`, so
+training and inference literally run the same code — there is no second
+implementation to drift. Two sets, chosen with `setFeatureSet()` and the third
+argument of `trainTMVA.C`:
+
+**Set 13 — the default, start here.**
 
 ```
 logE  nTowers  sigmaMax  sigmaMin  sigmaRatio  theta
 seedFrac  e2Frac  e1e2Asym  sigX  sigY  sigXY  nNeighbor
 ```
 
+Shape summary only. Few inputs, no positional tower grid, much less room to
+learn a fast-simulator artefact, trains in a couple of minutes, and the variables
+are ones you can plot against data one by one and defend.
+
+**Set 34 — the ePIC-style set, for the comparison.**
+
+```
+ 0  e            cluster energy [GeV]
+ 1  x            centroid, COLUMN units (not cm)
+ 2  y            centroid, ROW units
+ 3  nHits        towers in the cluster
+ 4  radius       sqrt(Σ E_i d_i² / Σ E_i) [cm], d_i from the centroid
+ 5  dispersion   same with log weights w_i = max(0, 4.5 + ln(E_i/E)) [cm]
+ 6  sigmaMin
+ 7  sigmaMax
+ 8..32  t00..t44 5×5 tower energies around the seed, cluster towers only
+ 33 eOut         cluster energy outside that 5×5
+```
+
+The set is part of the contract with the weight file, so it goes in the file name
+(`FcsCat13_BDTG.weights.xml`). A mismatch shows up as TMVA refusing to book the
+method, because the variable names do not match — noisy, which is what you want.
+
+`root -b -q testFeatures.C` checks the definitions against synthetic 1γ and 2γ
+tower patterns. Run it after any change to the header, before retraining.
+
 The feature maker additionally stores an 11×11 tower-energy image centred on the
-seed tower, plus a mask of which towers clustering assigned to this cluster.
-That is there for an image/GNN model of the ePIC kind; the 13 scalars are the
-TMVA path.
+seed tower, plus a mask of which towers clustering assigned to this cluster. The
+5×5 is cut out of that, so switching to 7×7 or to a CNN needs no new production.
+
+### Choices baked into set 34, and why
+
+- **Tower energies are stored as fractions of E** (`kTowerFractions = true`, in
+  all three files — change it in all three or the model silently sees different
+  numbers online than in training). Raw tower energies in GeV make the model
+  learn the energy spectrum of the training sample, which is precisely the thing
+  that differs most between the fast simulator and data. `e` is still input 0, so
+  no information is lost — it is just factorized.
+- **`x` and `y` are a hazard in your particular analysis.** They let the model
+  learn detector-region-specific behaviour, including which towers are badly
+  gained. You are using this inside a gain-calibration loop, so that is circular:
+  the categorizer could encode the miscalibration it is supposed to be blind to,
+  and the per-tower π⁰ mass fits would inherit it. I kept them because you asked
+  for the 34, but I would train once with and once without and compare the
+  per-tower mass fits before shipping. Dropping them means deleting entries 1–2
+  from all three lists and retraining.
+- **The 5×5 is not rotated.** A two-photon cluster has an axis; without rotating
+  into the principal-axis frame (`theta` is right there in `StFcsCluster`) the
+  model has to learn the same shape in every orientation, which is a real cost
+  for a BDT with 25 positionally-indexed inputs. Options, in increasing effort:
+  add `theta` as a 35th variable, rotate the 5×5 into the principal-axis frame
+  before flattening, or move to a CNN on the 11×11 image.
+- **`radius` and `dispersion` use the definitions in the header comment.** If
+  your ePIC framework defines them differently — and "dispersion" in particular
+  is used for at least three different quantities in the literature — change
+  them in `StFcsClusterFeatures.h` (one place) and rerun `testFeatures.C`.
+- **Granularity is not transferable.** FCS ECal towers are ~5.5 cm; a 5×5 there
+  covers a different number of Molière radii than a 5×5 in the ePIC ECal. The
+  same 34 variables therefore mean physically different things in the two
+  detectors. Retrain on STAR simulation from scratch — do not port ePIC weights.
 
 ## 4. Sequence I would actually follow
 
@@ -101,12 +166,14 @@ TMVA path.
    on every hit, which is where the labels come from. Also dump a data sample:
    you need the data/MC comparison of the input distributions before you trust
    anything trained on simulation.
-2. **Check the label definition.** `build_labels()` in `star_features.py` calls a
-   cluster "2 photons" when ≥2 photons each deposit >10% of the cluster energy.
-   That is a guess at your ePIC convention — replace it with yours; it is the one
-   place the physics definition lives.
-3. **Train.** `root4star -b -q 'trainTMVA.C("feat.root","FcsCat")'` gives you
-   multiclass BDTG and MLP weight files plus the usual TMVA GUI output.
+2. **Check the label definition.** The class assignment at the top of the event
+   loop in `trainTMVA.C` calls a cluster "2 photons" when ≥2 photons each deposit
+   >10% of the cluster energy (the 10% lives in `StFcsClusterFeatureMaker`'s
+   `mTruthFrac`). That is a guess at your ePIC convention — replace it with
+   yours; it is the one place the physics definition lives.
+3. **Train.** `root4star -b -q 'trainTMVA.C("feat.root","FcsCat",13)'` gives you
+   multiclass BDTG and MLP weight files plus the usual TMVA GUI output. Repeat
+   with `34` when you want the comparison — same command, different weight file.
 4. **Apply in QA mode first.** `mlcat->setMode(0)` changes nothing but fills the
    STAR-category vs ML-category migration matrix. Look at it before you let the
    model touch reconstruction.
@@ -130,16 +197,19 @@ TMVA path.
   is unsure.
 - `gSystem->Load("libTMVA")` must come **before** loading
   `StFcsMLCategoryMaker`.
-- BDTG is the sane first method here — 13 low-level shape variables, no scaling
-  needed, and it trains in minutes. Use the MLP as a cross-check, not as the
-  headline.
+- BDTG is the sane first method — no input scaling needed and it trains in
+  minutes. The MLP is a cross-check, not the headline.
+- When you do run set 34, watch the TMVA variable ranking: if the 5×5 towers rank
+  far below `sigmaMax` and `radius`, the tree is not extracting shower shape from
+  the raw grid, and a CNN on the stored 11×11 image is the better use of your
+  time than more trees. 34 inputs is also more room to overfit a fast-simulator
+  artefact — watch the overtraining check.
+- Nothing to install. TMVA is part of ROOT and ROOT is part of the STAR stack;
+  the SL7 container is read-only anyway. `BUILD.md` has the full recipe.
 
-If instead you want to keep your ePIC model as-is (PyTorch/sklearn), set
-`setBackend(1)` and export with `python/export_weights.py`. That path needs no
-ROOT/TMVA at all and is verified: the C++ evaluator reproduces the Python
-forward pass to <1e-7. A convolutional or graph model does **not** fit that
-format — for those, either extend `StFcsMLP.h` with conv layers or keep
-inference offline on the dumped tree.
+The `kTextMLP` backend and `optional_python/` exist only for the case where you
+would rather train outside ROOT (PyTorch/sklearn). For TMVA they are dead weight
+— ignore them.
 
 ## 6. Things to decide
 
@@ -150,7 +220,7 @@ inference offline on the dumped tree.
   first is a week; the second is a proposal to the FCS group.
 - **Data/MC.** The FCS fast simulator is a fast simulator. Shape variables like
   `sigmaMax` and `seedFrac` are exactly the ones that suffer. Plan on comparing
-  the 13 input distributions in data and MC, and on a reweighting or a
+  the input distributions in data and MC, and on a reweighting or a
   data-driven check (e.g. π⁰ mass peak in a low-multiplicity sample) before
   claiming a performance number.
 - **Where it runs.** If this is only for your π⁰ analysis, a private library and
@@ -161,8 +231,11 @@ inference offline on the dumped tree.
 
 ## 7. Not verified here
 
-I wrote these against the STAR doxygen for `StFcsCluster`, `StFcsHit`,
-`StFcsCollection` and `StFcsDb`, but nothing in `StRoot/` was compiled — there is
-no STAR library stack in this session. Expect to fix include paths and maybe a
-signature or two on the first `cons`. The one piece that *is* tested is
-`StFcsMLP.h` against `export_weights.py`.
+I wrote the makers against the STAR doxygen for `StFcsCluster`, `StFcsHit`,
+`StFcsCollection` and `StFcsDb`, but nothing that touches `StRoot/` was compiled
+— there is no STAR library stack in this session. Expect to fix an include path
+or a signature on the first `cons`.
+
+What *is* compiled and tested: `StFcsClusterFeatures.h` (builds clean under
+`g++ -Wall`, and `testFeatures.C` passes all its invariant checks), and
+`StFcsMLP.h` against the weight exporter.

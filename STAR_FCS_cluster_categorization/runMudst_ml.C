@@ -6,12 +6,12 @@
 //
 // Example:
 //   root4star -b -q 'runMudst_ml.C("st_physics_...MuDst.root",-1,5000,".",1,0,0,"","feat.root")'
-//   root4star -b -q 'runMudst_ml.C("st_physics_...MuDst.root",-1,5000,".",1,0,1,"weights/FcsCat_BDTG.weights.xml")'
+//   root4star -b -q 'runMudst_ml.C("st_physics_...MuDst.root",-1,5000,".",1,0,1,"weights/FcsCat13_BDTG.weights.xml")'
 
 void runMudst_ml(const char* file = "st_cosmic_adc_22326042_raw_0000005.MuDst.root",
                  int ifile = -1, Int_t nevt = 10, const char* outdir = ".", int readMuDst = 1,
                  int debug = 0, int mode = 0,
-                 const char* modelFile = "weights/FcsCat_BDTG.weights.xml",
+                 const char* modelFile = "weights/FcsCat13_BDTG.weights.xml",
                  const char* featFile = "fcsEcalClusterFeatures.root") {
    gROOT->Macro("Load.C");
    gROOT->Macro("$STAR/StRoot/StMuDSTMaker/COMMON/macros/loadSharedLibraries.C");
@@ -66,6 +66,7 @@ void runMudst_ml(const char* file = "st_cosmic_adc_22326042_raw_0000005.MuDst.ro
       gSystem->Load("libTMVA");  // must come before the maker's library
       gSystem->Load("StFcsMLCategoryMaker");
       StFcsMLCategoryMaker* mlcat = new StFcsMLCategoryMaker();
+      mlcat->setFeatureSet(13);  // 13 (default) or 34; must match the weight file
       mlcat->setBackend(0);      // 0 = TMVA::Reader, 1 = plain-text MLP
       mlcat->setTMVAMethod("BDTG");
       mlcat->setWeightFile(modelFile);

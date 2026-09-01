@@ -1,9 +1,10 @@
 // class StFcsMLCategoryMaker
-// see header for chain position, backends and category convention
+// see header for chain position, feature sets, backends and category convention
 
 #include "StFcsMLCategoryMaker.h"
 
 #include <cmath>
+#include <vector>
 
 #include "StEvent/StEnumerations.h"
 #include "StEvent/StEvent.h"
@@ -19,83 +20,54 @@
 #include "TH2.h"
 #include "TMVA/Reader.h"
 
+using namespace StFcsClusterFeatures;
+
 #ifndef SKIPDefImp
 ClassImp(StFcsMLCategoryMaker)
 #endif
 
-    // Variable names. TMVA matches training and application by NAME, so these
-    // strings have to be identical to the ones trainTMVA.C uses.
-    const char* StFcsMLCategoryMaker::kVarNames[StFcsMLCategoryMaker::kNVar] = {
-        "logE", "nTowers", "sigmaMax", "sigmaMin", "sigmaRatio", "theta", "seedFrac",
-        "e2Frac", "e1e2Asym", "sigX", "sigY", "sigXY", "nNeighbor"};
-
-StFcsMLCategoryMaker::StFcsMLCategoryMaker(const Char_t* name) : StMaker(name) {}
+    StFcsMLCategoryMaker::StFcsMLCategoryMaker(const Char_t* name) : StMaker(name) {}
 
 StFcsMLCategoryMaker::~StFcsMLCategoryMaker() {
    if (mReader) delete mReader;
 }
 
 //-----------------------------------------------------------------------------
-// Feature vector. THIS ORDER IS THE CONTRACT with python/star_features.py,
-// trainTMVA.C and kVarNames above.
-//   0  logE        log(E)
-//   1  nTowers
-//   2  sigmaMax
-//   3  sigmaMin
-//   4  sigmaRatio  sigmaMin / sigmaMax
-//   5  theta
-//   6  seedFrac    e1 / E
-//   7  e2Frac      e2 / E
-//   8  e1e2Asym    (e1-e2)/(e1+e2)
-//   9  sigX        second moments in cell units
-//   10 sigY
-//   11 sigXY
-//   12 nNeighbor
-std::vector<float> StFcsMLCategoryMaker::features(StFcsCluster* clu, StFcsDb* db) {
-   std::vector<float> f(kNVar, 0.0);
-   const float E = clu->energy();
+// Adapter: StFcsCluster -> StFcsClusterFeatures::ClusterInput -> compute().
+// No variable is defined here; the definitions live in StFcsClusterFeatures.h
+// so that trainTMVA.C computes exactly the same numbers from the tree.
+int StFcsMLCategoryMaker::features(StFcsCluster* clu, StFcsDb* db, int set, float* out) {
+   StPtrVecFcsHit& hits = clu->hits();
+   const int n = (int)hits.size();
+   if (n <= 0) return 0;
    const int det = clu->detectorId();
 
-   float e1 = -1, e2 = -1;
-   double wtot = 0, sx = 0, sy = 0, sxy = 0, mx = 0, my = 0;
-   StPtrVecFcsHit& hits = clu->hits();
-   for (size_t k = 0; k < hits.size(); k++) {
-      const float he = hits[k]->energy();
-      const int row = db->getRowNumber(det, hits[k]->id());
-      const int col = db->getColumnNumber(det, hits[k]->id());
-      if (he > e1) {
-         e2 = e1;
-         e1 = he;
-      } else if (he > e2) {
-         e2 = he;
-      }
-      wtot += he;
-      mx += he * col;
-      my += he * row;
-      sx += he * col * col;
-      sy += he * row * row;
-      sxy += he * col * row;
+   std::vector<float> te(n);
+   std::vector<int> trow(n);
+   std::vector<int> tcol(n);
+   for (int k = 0; k < n; k++) {
+      te[k] = hits[k]->energy();
+      trow[k] = db->getRowNumber(det, hits[k]->id());
+      tcol[k] = db->getColumnNumber(det, hits[k]->id());
    }
-   if (wtot <= 0) return f;
-   mx /= wtot;
-   my /= wtot;
-   if (e2 < 0) e2 = 0;
 
-   const float smax = clu->sigmaMax();
-   f[0] = (E > 0) ? log(E) : -10.0;
-   f[1] = clu->nTowers();
-   f[2] = smax;
-   f[3] = clu->sigmaMin();
-   f[4] = (smax > 0) ? clu->sigmaMin() / smax : 0.0;
-   f[5] = clu->theta();
-   f[6] = (E > 0) ? e1 / E : 0.0;
-   f[7] = (E > 0) ? e2 / E : 0.0;
-   f[8] = (e1 + e2 > 0) ? (e1 - e2) / (e1 + e2) : 1.0;
-   f[9] = sqrt(fabs(sx / wtot - mx * mx));
-   f[10] = sqrt(fabs(sy / wtot - my * my));
-   f[11] = sxy / wtot - mx * my;
-   f[12] = clu->nNeighbor();
-   return f;
+   ClusterInput c;
+   c.e = clu->energy();
+   c.x = clu->x();
+   c.y = clu->y();
+   c.sigmaMin = clu->sigmaMin();
+   c.sigmaMax = clu->sigmaMax();
+   c.theta = clu->theta();
+   c.nTowers = clu->nTowers();
+   c.nNeighbor = clu->nNeighbor();
+   c.xw = db->getXWidth(det);
+   c.yw = db->getYWidth(det);
+   c.nTow = n;
+   c.towerE = &te[0];
+   c.towerRow = &trow[0];
+   c.towerCol = &tcol[0];
+
+   return compute(set, c, out);
 }
 
 //-----------------------------------------------------------------------------
@@ -106,13 +78,19 @@ Int_t StFcsMLCategoryMaker::Init() {
       return kStFatal;
    }
 
+   const int nv = nVar(mFeatureSet);
+   const char** names = varNames(mFeatureSet);
+   LOG_INFO << "StFcsMLCategoryMaker: feature set " << mFeatureSet << " (" << nv << " variables)" << endm;
+
    if (mBackend == kTMVA) {
       mReader = new TMVA::Reader("!Color:!Silent");
-      for (int i = 0; i < kNVar; i++) mReader->AddVariable(kVarNames[i], &mVar[i]);
-      // BookMVA does not throw on a bad path, it complains and returns 0
+      for (int i = 0; i < nv; i++) mReader->AddVariable(names[i], &mVar[i]);
+      // BookMVA does not throw on a bad path, it complains and returns 0. It
+      // also fails when the weight file was trained with different variable
+      // names - which is what a feature-set mismatch looks like.
       if (!mReader->BookMVA(mTMVAMethod.c_str(), mWeightFile.c_str())) {
          LOG_ERROR << "StFcsMLCategoryMaker::Init TMVA could not book " << mTMVAMethod << " from "
-                   << mWeightFile << endm;
+                   << mWeightFile << " - check it was trained with feature set " << mFeatureSet << endm;
          return kStFatal;
       }
       LOG_INFO << "StFcsMLCategoryMaker: TMVA method " << mTMVAMethod << " from " << mWeightFile << endm;
@@ -121,9 +99,9 @@ Int_t StFcsMLCategoryMaker::Init() {
          LOG_ERROR << "StFcsMLCategoryMaker::Init failed to load " << mWeightFile << endm;
          return kStFatal;
       }
-      if (mNet.nOutput() != 3 || mNet.nInput() != kNVar) {
+      if (mNet.nOutput() != 3 || mNet.nInput() != nv) {
          LOG_ERROR << "StFcsMLCategoryMaker::Init model shape mismatch: nin=" << mNet.nInput()
-                   << " nout=" << mNet.nOutput() << " expected " << kNVar << " and 3" << endm;
+                   << " nout=" << mNet.nOutput() << " expected " << nv << " and 3" << endm;
          return kStFatal;
       }
    }
@@ -145,6 +123,9 @@ Int_t StFcsMLCategoryMaker::Make() {
    mFcsColl = event->fcsCollection();
    if (!mFcsColl) return kStErr;
 
+   const int nv = nVar(mFeatureSet);
+   float f[kNVarMax];
+
    for (int det = 0; det < 2; det++) {
       if (mFcsDb->ecalHcalPres(det) != 0) continue;
       StSPtrVecFcsCluster& clusters = mFcsColl->clusters(det);
@@ -152,12 +133,11 @@ Int_t StFcsMLCategoryMaker::Make() {
       for (int ic = 0; ic < nc; ic++) {
          StFcsCluster* clu = clusters[ic];
          if (clu->energy() < mEmin) continue;
-
-         const std::vector<float> f = features(clu, mFcsDb);
+         if (features(clu, mFcsDb, mFeatureSet, f) != nv) continue;
 
          float p[3] = {0, 0, 0};
          if (mBackend == kTMVA) {
-            for (int i = 0; i < kNVar; i++) mVar[i] = f[i];
+            for (int i = 0; i < nv; i++) mVar[i] = f[i];
             const std::vector<Float_t>& r = mReader->EvaluateMulticlass(mTMVAMethod.c_str());
             if (r.size() != 3) {
                LOG_WARN << "StFcsMLCategoryMaker: multiclass response has " << r.size()
@@ -166,7 +146,8 @@ Int_t StFcsMLCategoryMaker::Make() {
             }
             for (int i = 0; i < 3; i++) p[i] = r[i];
          } else {
-            const std::vector<float> r = mNet.eval(f);
+            std::vector<float> in(f, f + nv);
+            const std::vector<float> r = mNet.eval(in);
             if (r.size() != 3) continue;
             for (int i = 0; i < 3; i++) p[i] = r[i];
          }

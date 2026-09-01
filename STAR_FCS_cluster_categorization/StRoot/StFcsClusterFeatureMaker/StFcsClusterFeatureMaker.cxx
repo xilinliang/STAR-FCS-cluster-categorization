@@ -75,6 +75,8 @@ Int_t StFcsClusterFeatureMaker::Init() {
    mTree->Branch("seedFrac", &bSeedFrac, "seedFrac/F");
    mTree->Branch("e2Frac", &bE2Frac, "e2Frac/F");
    mTree->Branch("e1e2Frac", &bE1e2Frac, "e1e2Frac/F");
+   mTree->Branch("xw", &bXW, "xw/F");
+   mTree->Branch("yw", &bYW, "yw/F");
    mTree->Branch("sigX", &bSigX, "sigX/F");
    mTree->Branch("sigY", &bSigY, "sigY/F");
    mTree->Branch("sigXY", &bSigXY, "sigXY/F");
@@ -144,6 +146,8 @@ Int_t StFcsClusterFeatureMaker::Make() {
 
       const int nCol = mFcsDb->nColumn(det);
       const int nRow = mFcsDb->nRow(det);
+      bXW = mFcsDb->getXWidth(det);
+      bYW = mFcsDb->getYWidth(det);
 
       // full detector tower energy map for this event, so the image window can
       // include towers that clustering did not assign to this cluster

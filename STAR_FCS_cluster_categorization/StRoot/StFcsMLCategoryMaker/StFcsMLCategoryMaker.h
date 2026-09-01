@@ -12,13 +12,21 @@
 //   1 = single photon
 //   2 = two photons
 //
+// The input variables are defined once, in StFcsClusterFeatures.h, which
+// trainTMVA.C includes as well - training and inference literally run the same
+// code. Two sets, selected with setFeatureSet():
+//   13 (default) - shape summary variables. Start here.
+//   34           - the ePIC-style set with the 5x5 tower energies.
+// The set is part of the contract with the weight file: train and apply with
+// the same number, and keep it in the weight file name.
+//
 // Two inference backends:
-//   kTMVA    - TMVA::Reader, multiclass. ROOT ships TMVA, so nothing new has to
-//              be built at RCF. Train the weight file with the SAME ROOT that
-//              root4star uses (run trainTMVA.C under root4star) - TMVA weight
-//              XML is not guaranteed to read across ROOT major versions.
-//   kTextMLP - StFcsMLP.h, a plain-text dense network. Use it if you would
-//              rather train in PyTorch/sklearn; no ROOT/TMVA involvement.
+//   kTMVA    - TMVA::Reader, multiclass. ROOT ships TMVA, so nothing extra has
+//              to be installed at RCF. Train the weight file with the SAME ROOT
+//              that root4star uses - TMVA weight XML is not guaranteed to read
+//              across ROOT major versions.
+//   kTextMLP - StFcsMLP.h, a plain-text dense network, only needed if a model
+//              is trained outside ROOT. Ignore it if you are using TMVA.
 //
 // author: generated for Xilin Liang
 
@@ -26,8 +34,8 @@
 #define STAR_StFcsMLCategoryMaker_HH
 
 #include <string>
-#include <vector>
 
+#include "StFcsClusterFeatures.h"
 #include "StFcsMLP.h"
 #include "StMaker.h"
 
@@ -46,9 +54,6 @@ class StFcsMLCategoryMaker : public StMaker {
    enum Mode { kQaOnly = 0, kOverride = 1, kOverrideIfConfident = 2 };
    enum Backend { kTMVA = 0, kTextMLP = 1 };
 
-   static const int kNVar = 13;
-   static const char* kVarNames[kNVar];  // must match the names used in training
-
    StFcsMLCategoryMaker(const Char_t* name = "FcsMLCat");
    ~StFcsMLCategoryMaker();
 
@@ -56,6 +61,7 @@ class StFcsMLCategoryMaker : public StMaker {
    Int_t Make();
    Int_t Finish();
 
+   void setFeatureSet(int n) { mFeatureSet = (n == 34) ? 34 : 13; }
    void setBackend(int b) { mBackend = b; }
    void setWeightFile(const char* f) { mWeightFile = f; }     // TMVA XML or StFcsMLP text
    void setTMVAMethod(const char* m) { mTMVAMethod = m; }     // e.g. "BDTG", "MLP"
@@ -64,20 +70,20 @@ class StFcsMLCategoryMaker : public StMaker {
    void setConfidence(float c) { mConfidence = c; }  // used by kOverrideIfConfident
    void setEnergyThreshold(float e) { mEmin = e; }   // below this, keep the STAR category
 
-   // Feature vector fed to the model. Keep this in lockstep with
-   // python/star_features.py::build_features and with trainTMVA.C - same order,
-   // same definitions, same names.
-   static std::vector<float> features(StFcsCluster* clu, StFcsDb* db);
+   // Pull an StFcsCluster apart into the plain arrays StFcsClusterFeatures
+   // wants, then compute. Returns the number of variables filled, 0 on failure.
+   static int features(StFcsCluster* clu, StFcsDb* db, int set, float* out);
 
   private:
    StFcsDb* mFcsDb = 0;
    StFcsCollection* mFcsColl = 0;
 
+   int mFeatureSet = 13;
    int mBackend = kTMVA;
-   std::string mWeightFile = "weights/FcsCat_BDTG.weights.xml";
+   std::string mWeightFile = "weights/FcsCat13_BDTG.weights.xml";
    std::string mTMVAMethod = "BDTG";
    TMVA::Reader* mReader = 0;
-   Float_t mVar[kNVar];  // TMVA::Reader needs stable addresses
+   Float_t mVar[StFcsClusterFeatures::kNVarMax];  // TMVA::Reader needs stable addresses
    StFcsMLP mNet;
 
    std::string mQaFile = "";
