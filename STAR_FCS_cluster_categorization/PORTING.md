@@ -93,14 +93,53 @@ argument of `trainTMVA.C`:
 
 **Set 13 — the default, start here.**
 
-```
-logE  nTowers  sigmaMax  sigmaMin  sigmaRatio  theta
-seedFrac  e2Frac  e1e2Asym  sigX  sigY  sigXY  nNeighbor
-```
+| # | Name | Definition | Where it comes from |
+|---|---|---|---|
+| 0 | `logE` | ln(E) | `clu->energy()` |
+| 1 | `nTowers` | towers in the cluster | `clu->nTowers()` |
+| 2 | `sigmaMax` | width along the major principal axis | `clu->sigmaMax()` |
+| 3 | `sigmaMin` | width along the minor axis | `clu->sigmaMin()` |
+| 4 | `sigmaRatio` | `sigmaMin / sigmaMax` | derived |
+| 5 | `theta` | principal-axis angle | `clu->theta()` |
+| 6 | `seedFrac` | e₁ / E | loop over `clu->hits()` |
+| 7 | `e2Frac` | e₂ / E | loop over `clu->hits()` |
+| 8 | `e1e2Asym` | (e₁ − e₂)/(e₁ + e₂) | loop over `clu->hits()` |
+| 9 | `sigX` | √(⟨col²⟩ − ⟨col⟩²), energy-weighted | loop over `clu->hits()` |
+| 10 | `sigY` | √(⟨row²⟩ − ⟨row⟩²), energy-weighted | loop over `clu->hits()` |
+| 11 | `sigXY` | ⟨col·row⟩ − ⟨col⟩⟨row⟩ | loop over `clu->hits()` |
+| 12 | `nNeighbor` | neighbouring clusters | `clu->nNeighbor()` |
 
-Shape summary only. Few inputs, no positional tower grid, much less room to
-learn a fast-simulator artefact, trains in a couple of minutes, and the variables
-are ones you can plot against data one by one and defend.
+e₁ and e₂ are the highest and second-highest tower energies in the cluster.
+
+Only two sources feed this. Six variables are read straight off `StFcsCluster`,
+where `StFcsClusterMaker` has already computed them — `sigmaMax`, `sigmaMin` and
+`theta` being the eigen-decomposition of the energy-weighted covariance matrix
+of the tower positions. The other seven come from a single loop over
+`clu->hits()`, where each `StFcsHit` gives `energy()` and an `id()` that
+`StFcsDb::getRowNumber` / `getColumnNumber` turn into a row and column. **Row and
+column are cell units, not cm** — the STAR FCS convention, which is why `sigX`
+and `sigY` are dimensionless here while `radius` in set 34 is in cm.
+
+Why these separate one photon from two: a merged π⁰ splits its energy between
+towers, so `seedFrac` drops and `e1e2Asym` → 0, while a single photon
+concentrates in one tower. `sigmaMax` grows along the axis joining the two
+showers while `sigmaMin` does not, so `sigmaRatio` → 0 for a genuine two-photon
+cluster and stays near 1 for a round one. `logE` is in because every one of
+those thresholds moves with energy — which is exactly what STAR's hand-tuned cut
+encodes with its `+0.003*e` and `7.0/e` terms, and what the model gets to learn
+from data instead.
+
+One redundancy worth knowing about: variables 2–5 and 9–11 are the *same*
+second-moment matrix in two bases. `sigmaMax`/`sigmaMin`/`theta` are its
+eigenvalues and rotation angle; `sigX`/`sigY`/`sigXY` are its raw elements.
+Feeding a BDT both is not wrong — the rotation-invariant pair is the more
+physical, the raw moments keep the detector frame — but they are strongly
+correlated, so do not read the TMVA variable ranking as if they were independent
+handles. Dropping `sigX`/`sigY`/`sigXY` costs almost nothing and takes you to 10.
+
+Shape summary only, no positional tower grid: much less room to learn a
+fast-simulator artefact than set 34, trains in a couple of minutes, and every
+variable is one you can plot against data on its own and defend.
 
 **Set 34 — the ePIC-style set, for the comparison.**
 
