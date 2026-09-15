@@ -17,6 +17,14 @@
 // The input variables come from StFcsClusterFeatures.h - the same header the
 // inference maker uses - so training and application cannot drift apart.
 //
+// Feature sets: 6, 13 or 34. Use 6 when the model will be applied to picoDst
+// input: StPicoFcsCluster stores no tower list, so those six variables are the
+// only ones that exist on both sides. The training sample comes from a MuDst
+// chain either way, because that is where the GEANT truth links live - see
+// StFcsClusterFeatureMaker. Set 6 costs you the tower-level shape detail, so
+// expect it to separate 1-photon from 2-photon clusters less sharply than 13;
+// train both on the same sample and compare before deciding it is good enough.
+//
 // author: generated for Xilin Liang
 
 #include "RVersion.h"
@@ -33,7 +41,7 @@
 
 void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
                const char* jobname = "FcsCat",
-               int featureSet = 13,          // 13 or 34
+               int featureSet = 13,          // 6, 13 or 34 - see the note above
                const char* treename = "clusters",
                float purityCut = 0.8,
                float eMin = 0.5) {

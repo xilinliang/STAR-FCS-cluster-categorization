@@ -41,9 +41,18 @@ const bool kTowerFractions = true;
 //   w_i = max(0, kW0 + ln(E_i/E))
 const double kW0 = 4.5;
 
-inline int nVar(int set) { return (set == 34) ? 34 : 13; }
+inline int nVar(int set) {
+   if (set == 34) return 34;
+   if (set == 6) return 6;
+   return 13;
+}
 
 inline const char** varNames(int set) {
+   // Set 6 is the first six of set 13, same names and same definitions on
+   // purpose: it is the subset that survives into StPicoDst, where the
+   // cluster's tower list is not stored. Train on MuDst with set 6 and the
+   // model applies unchanged to picoDst input.
+   static const char* n6[6] = {"logE", "nTowers", "sigmaMax", "sigmaMin", "sigmaRatio", "theta"};
    static const char* n13[13] = {"logE",     "nTowers", "sigmaMax", "sigmaMin", "sigmaRatio",
                                  "theta",    "seedFrac", "e2Frac",  "e1e2Asym", "sigX",
                                  "sigY",     "sigXY",   "nNeighbor"};
@@ -55,13 +64,19 @@ inline const char** varNames(int set) {
                                  "t30", "t31", "t32", "t33", "t34",
                                  "t40", "t41", "t42", "t43", "t44",
                                  "eOut"};
-   return (set == 34) ? n34 : n13;
+   if (set == 34) return n34;
+   if (set == 6) return n6;
+   return n13;
 }
 
 // Everything one cluster contributes. Rows and columns are the STAR FCS
 // 1-based tower indices; x and y are the cluster centroid in COLUMN and ROW
 // units (the StFcsCluster convention, not cm); xw and yw are the cell widths
 // in cm and are only used by the 34-variable set.
+//
+// Set 6 needs only e, sigmaMin, sigmaMax, theta and nTowers - no tower arrays.
+// That is what makes it usable on StPicoDst, which stores the cluster summary
+// but not the list of towers that went into it. Leave nTow at 0 there.
 struct ClusterInput {
    float e;
    float x;
@@ -84,7 +99,22 @@ struct ClusterInput {
 inline int compute(int set, const ClusterInput& c, float* out) {
    const int nv = nVar(set);
    for (int i = 0; i < nv; i++) out[i] = 0.0;
-   if (c.nTow <= 0 || c.e <= 0) return 0;
+   if (c.e <= 0) return 0;
+   if (set != 6 && c.nTow <= 0) return 0;  // set 6 needs no tower list
+
+   if (set == 6) {
+      // ---------------------------------------------------------------- 6
+      // Identical definitions to the first six of set 13. Everything here is
+      // available from StFcsCluster, StMuFcsCluster and StPicoFcsCluster
+      // alike, so one model covers MuDst and picoDst input.
+      out[0] = log(c.e);
+      out[1] = c.nTowers;
+      out[2] = c.sigmaMax;
+      out[3] = c.sigmaMin;
+      out[4] = (c.sigmaMax > 0) ? c.sigmaMin / c.sigmaMax : 0.0;
+      out[5] = c.theta;
+      return 6;
+   }
 
    if (set != 34) {
       // --------------------------------------------------------------- 13

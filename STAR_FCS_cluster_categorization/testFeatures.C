@@ -11,6 +11,7 @@
 
 #include <cstdio>
 #include <cmath>
+#include <cstring>
 
 #include "StRoot/StFcsMLCategoryMaker/StFcsClusterFeatures.h"
 
@@ -107,9 +108,36 @@ int testFeatures() {
    ClusterInput c1 = toInput(one);
    ClusterInput c2 = toInput(two);
 
+   dump(6, "single photon", c1);
+   dump(6, "two photons", c2);
    dump(13, "single photon", c1);
    dump(13, "two photons", c2);
    dump(34, "two photons", c2);
+
+   // set 6 must be exactly the first six of set 13 - that equality is what lets
+   // a model trained on MuDst be applied to picoDst input
+   {
+      float a6[kNVarMax], a13[kNVarMax], b6[kNVarMax], b13[kNVarMax];
+      compute(6, c1, a6);
+      compute(13, c1, a13);
+      compute(6, c2, b6);
+      compute(13, c2, b13);
+      bool same = true;
+      for (int i = 0; i < 6; i++) {
+         if (fabs(a6[i] - a13[i]) > 1e-6 || fabs(b6[i] - b13[i]) > 1e-6) same = false;
+         if (strcmp(varNames(6)[i], varNames(13)[i]) != 0) same = false;
+      }
+      printf("checks, feature set 6:\n");
+      check(same, "set 6 == first six of set 13, values and names");
+      ClusterInput noTowers = c1;
+      noTowers.nTow = 0;
+      noTowers.towerE = 0;
+      noTowers.towerRow = 0;
+      noTowers.towerCol = 0;
+      float t6[kNVarMax], t13[kNVarMax];
+      check(compute(6, noTowers, t6) == 6, "set 6 works with no tower list (the picoDst case)");
+      check(compute(13, noTowers, t13) == 0, "set 13 correctly refuses with no tower list");
+   }
 
    float a[kNVarMax], b[kNVarMax];
    compute(13, c1, a);

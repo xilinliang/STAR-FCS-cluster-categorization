@@ -68,13 +68,15 @@ Two gotchas that cost people a day each:
 ## 3. What is in this package
 
 ```
-StRoot/StFcsClusterFeatureMaker/   dump one tree entry per ECal cluster
-StRoot/StFcsMLCategoryMaker/       apply the trained model, set category()
+StRoot/StFcsClusterFeatureMaker/   dump one tree entry per ECal cluster (MuDst)
+StRoot/StFcsMLCategoryMaker/       apply the trained model, set category() (MuDst)
   ├ StFcsClusterFeatures.h         THE definition of the input variables
   └ StFcsMLP.h                     dense-net evaluator (non-TMVA backend only)
+StRoot/StFcsPicoCategoryMaker/     apply the model to StPicoDst input
 trainTMVA.C                        TMVA multiclass training on the dumped tree
 testFeatures.C                     smoke test for the feature definitions
 runMudst_ml.C                      your runMudst.C with both makers wired in
+runPicoDst_ml.C                    the same, for picoDst input
 BUILD.md                           SL7 container, cons, and job submission
 optional_python/                   numpy reader + PyTorch exporter, not needed
 ```
@@ -268,7 +270,58 @@ would rather train outside ROOT (PyTorch/sklearn). For TMVA they are dead weight
   weight file needs a home (`StarDb` or a versioned path) rather than a relative
   filename in a macro.
 
-## 7. Not verified here
+## 7. picoDst input
+
+`StFcsPicoCategoryMaker` + `runPicoDst_ml.C` run the categorization on
+`StPicoDst` files instead of MuDst. One thing decides how that path looks:
+
+**picoDst does not store which towers belong to a cluster.**
+`StPicoDstMaker::fillFcsClusters()` copies the scalar summary of each
+`StMuFcsCluster` — id, detectorId, category, nTowers, x, y, sigmaMin, sigmaMax,
+theta, chi2Ndf1/2Photon, four-momentum — and drops `StMuFcsCluster::hits()`.
+`FcsHits` is written as a separate flat collection with no back-pointer. The
+association exists in the MuDst one step upstream and is lost in the conversion.
+
+So seven of the thirteen variables (`seedFrac`, `e2Frac`, `e1e2Asym`, `sigX`,
+`sigY`, `sigXY`, and `nNeighbor`) cannot be computed from a picoDst. Hence
+**feature set 6**: `logE`, `nTowers`, `sigmaMax`, `sigmaMin`, `sigmaRatio`,
+`theta` — defined identically to the first six of set 13, in the same
+`compute()`, so a model trained on MuDst applies to pico input unchanged.
+`testFeatures.C` asserts that equality rather than trusting it.
+
+The workflow, then:
+
+```sh
+# train on MuDst (that is where the GEANT truth links are), with set 6
+root4star -b -q 'trainTMVA.C("feat.root","FcsCat",6)'
+
+# look at pico input with no model at all, first
+root4star -b -q 'runPicoDst_ml.C("pi0.e30.vz0.run3.picoDst.root",-1,0)'
+
+# then apply
+root4star -b -q 'runPicoDst_ml.C("pi0...root",-1,1,"weights/FcsCat6_BDTG.weights.xml")'
+```
+
+Three limits of the pico path, all structural rather than fixable in this code:
+
+- **The category cannot steer the photon fit.** On MuDst the whole point is that
+  `StFcsMLCategoryMaker` runs *before* `StFcsPointMaker`, which then fits one or
+  two photons accordingly. A picoDst is already reconstructed; nothing runs
+  downstream. Here the category can only act as a selection on which clusters
+  enter an analysis, so the π⁰ histograms compare *selections*, not refits. The
+  real gain needs the MuDst chain.
+- **No `StFcsPoint` collection in picoDst**, so the π⁰ QA pairs clusters.
+- **`chi2Ndf1Photon` / `chi2Ndf2Photon` are only filled if `StFcsPointMaker` ran
+  in the chain that produced the picoDst.** In the `pi0.e30.vz0.run3` sample
+  they are identically zero for every cluster, so there is no fitter baseline to
+  compare against on that file.
+
+If you want the full 13 on pico input, the clean fix is upstream: add the tower
+indices to `StPicoFcsCluster` and have `fillFcsClusters()` fill them, then
+re-produce. That is a `star-sw` change plus a production pass — worth it if pico
+becomes the main format for this analysis, not worth it for a study.
+
+## 8. Not verified here
 
 I wrote the makers against the STAR doxygen for `StFcsCluster`, `StFcsHit`,
 `StFcsCollection` and `StFcsDb`, but nothing that touches `StRoot/` was compiled
@@ -278,3 +331,11 @@ or a signature on the first `cons`.
 What *is* compiled and tested: `StFcsClusterFeatures.h` (builds clean under
 `g++ -Wall`, and `testFeatures.C` passes all its invariant checks), and
 `StFcsMLP.h` against the weight exporter.
+
+For the picoDst path specifically: the set-6 feature computation was run through
+`compute(6, ...)` on all 130 ECal clusters above 0.5 GeV in
+`pi0.e30.vz0.run3.picoDst.root` and agrees with an independent calculation to
+float precision, including the 8 clusters with `sigmaMax == 0` where
+`sigmaRatio` must not divide by zero. The ROOT I/O around it —
+`StPicoDstMaker`, the branch names, `StPicoDst::fcsCluster()` — is written from
+the `star-sw` headers and has not been run; that needs a `cons` build.

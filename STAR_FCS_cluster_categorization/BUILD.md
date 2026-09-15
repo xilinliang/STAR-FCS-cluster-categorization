@@ -13,10 +13,17 @@ Next to your existing `StRoot/StFcsPi0FinderForEcal`:
   StRoot/StFcsPi0FinderForEcal/       (already there)
   StRoot/StFcsClusterFeatureMaker/    (new)
   StRoot/StFcsMLCategoryMaker/        (new)
+  StRoot/StFcsPicoCategoryMaker/      (new, picoDst input)
   runMudst_ml.C
+  runPicoDst_ml.C
   trainTMVA.C
   testFeatures.C
 ```
+
+`StFcsPicoCategoryMaker` includes `StFcsMLCategoryMaker/StFcsClusterFeatures.h`
+by that relative path, which `cons` resolves through its `-IStRoot` flag — the
+two packages share one definition of the input variables rather than each
+carrying a copy.
 
 `StFcsClusterFeatures.h` lives inside `StRoot/StFcsMLCategoryMaker/` and is
 included both by the maker and by `trainTMVA.C` — that is deliberate, it is the
@@ -100,6 +107,18 @@ root4star -b -q 'trainTMVA.C("feat.root","FcsCat",13)'
 # 3. apply (mode 1), starting in QA-only mode
 root4star -b -q 'runMudst_ml.C("<MuDst>",-1,-2,".",1,0,1,"weights/FcsCat13_BDTG.weights.xml")'
 ```
+
+For picoDst input, train with feature set 6 and use the other chain:
+
+```csh
+root4star -b -q 'trainTMVA.C("feat.root","FcsCat",6)'
+root4star -b -q 'runPicoDst_ml.C("<picoDst or .list>",-1,0)'   # no model, look first
+root4star -b -q 'runPicoDst_ml.C("<picoDst or .list>",-1,1,"weights/FcsCat6_BDTG.weights.xml")'
+```
+
+Set 6 is not a preference there — picoDst does not store a cluster's tower list,
+so the other seven variables do not exist on that input. `PORTING.md` section 7
+has the details and the limits that come with it.
 
 Step 2 must run under `root4star` in the container, not under some other ROOT.
 TMVA weight XML is not guaranteed to be readable across ROOT major versions, and
