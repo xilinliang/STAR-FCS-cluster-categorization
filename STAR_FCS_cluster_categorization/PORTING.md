@@ -90,10 +90,55 @@ working folder next to `StFcsPi0FinderForEcal` and build.
 Defined once, in `StFcsClusterFeatures.h`. Both `trainTMVA.C` and
 `StFcsMLCategoryMaker` include that header and call the same `compute()`, so
 training and inference literally run the same code — there is no second
-implementation to drift. Two sets, chosen with `setFeatureSet()` and the third
-argument of `trainTMVA.C`:
+implementation to drift. Four sets, chosen with `setFeatureSet()` and the third
+argument of `trainTMVA.C`. **Set ids are not variable counts** — 3 means the 3×3
+set and has 13 variables:
 
-**Set 13 — the default, start here.**
+| id | variables | needs towers? | works on picoDst? |
+|---|---|---|---|
+| 3 | 13 | yes | no |
+| 6 | 6 | no | **yes** |
+| 13 | 13 | yes | no |
+| 34 | 34 | yes | no |
+
+**Set 3 — the 3×3 set. The best place to start.**
+
+The id names the window, not the variable count: it has 13 variables.
+
+```
+ 0  e         cluster energy [GeV]
+ 1  sigmaMax  major-axis width
+ 2  sigmaMin  minor-axis width
+ 3  seedFrac  e1 / E
+ 4..12  t00..t22  3×3 tower energies around the seed, cluster towers only,
+        divided by E when kTowerFractions
+```
+
+Same count as set 13, but the inputs are raw rather than derived: the 3×3 *is*
+the shower shape, so the model builds whatever moments it wants instead of being
+handed `sigX`/`sigY`/`sigXY` and the correlated `sigmaRatio`/`theta` on top.
+`sigmaMax` and `sigmaMin` stay because they are rotation-invariant and the 3×3
+is not — a two-photon split along x and the same split along y give different
+tower patterns but the same pair of widths.
+
+Two things to know before training it:
+
+- **`seedFrac` and `t11` are the same number** when `kTowerFractions` is on and
+  the window is seed-centred. Harmless for a BDT, but it wastes an input and
+  makes the variable ranking read oddly. `compute()` has a one-line comment
+  showing how to spend that slot on the energy *outside* the 3×3 instead, which
+  is information the 3×3 genuinely does not contain — and is exactly what a
+  wide merged shower looks like.
+- **3×3 is tight for a merged π⁰.** At FCS ECal granularity (~5.5 cm towers) two
+  photons a couple of towers apart put real energy outside the window, where
+  this set is blind to it. `nTowers` is not in set 3, so if you find the model
+  struggling on wide clusters, the cheapest fix is that `eOut` swap; the next
+  one is moving to 5×5.
+
+`testFeatures.C` checks all of this, including that the 3×3 fractions sum to at
+most 1 and that a single photon is better contained than two.
+
+**Set 13 — the derived-shape set.**
 
 | # | Name | Definition | Where it comes from |
 |---|---|---|---|

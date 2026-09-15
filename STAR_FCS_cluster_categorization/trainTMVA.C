@@ -17,7 +17,12 @@
 // The input variables come from StFcsClusterFeatures.h - the same header the
 // inference maker uses - so training and application cannot drift apart.
 //
-// Feature sets: 6, 13 or 34. Use 6 when the model will be applied to picoDst
+// Feature sets: 3, 6, 13 or 34. Set 3 is the 3x3 one - the id names the
+// window, not the variable count, and it has 13 variables. It is the good
+// starting point: raw tower energies plus E, sigmaMax, sigmaMin and E1/E, with
+// none of the correlated derived triplets of set 13.
+//
+// Use 6 when the model will be applied to picoDst
 // input: StPicoFcsCluster stores no tower list, so those six variables are the
 // only ones that exist on both sides. The training sample comes from a MuDst
 // chain either way, because that is where the GEANT truth links live - see
@@ -41,7 +46,7 @@
 
 void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
                const char* jobname = "FcsCat",
-               int featureSet = 13,          // 6, 13 or 34 - see the note above
+               int featureSet = 13,          // 3, 6, 13 or 34 - see the note above
                const char* treename = "clusters",
                float purityCut = 0.8,
                float eMin = 0.5) {

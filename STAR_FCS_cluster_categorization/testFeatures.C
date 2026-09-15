@@ -108,6 +108,8 @@ int testFeatures() {
    ClusterInput c1 = toInput(one);
    ClusterInput c2 = toInput(two);
 
+   dump(3, "single photon", c1);
+   dump(3, "two photons", c2);
    dump(6, "single photon", c1);
    dump(6, "two photons", c2);
    dump(13, "single photon", c1);
@@ -137,6 +139,33 @@ int testFeatures() {
       float t6[kNVarMax], t13[kNVarMax];
       check(compute(6, noTowers, t6) == 6, "set 6 works with no tower list (the picoDst case)");
       check(compute(13, noTowers, t13) == 0, "set 13 correctly refuses with no tower list");
+   }
+
+   // set 3: the 3x3 set. 13 variables, not 3 - the id names the window.
+   {
+      float a[kNVarMax], b[kNVarMax];
+      const int na = compute(3, c1, a);
+      const int nb = compute(3, c2, b);
+      printf("checks, feature set 3 (3x3):\n");
+      check(na == 13 && nb == 13, "set 3 returns 13 variables");
+      double sa = 0, sb = 0;
+      for (int i = 4; i < 13; i++) {
+         sa += a[i];
+         sb += b[i];
+      }
+      check(sa > 0.0 && sa <= 1.0001, "3x3 fractions sum to at most 1 (one photon)");
+      check(sb > 0.0 && sb <= 1.0001, "3x3 fractions sum to at most 1 (two photons)");
+      check(sa > sb, "single photon is better contained in 3x3 than two photons");
+      check(fabs(a[3] - a[4 + 4]) < 1e-6, "seedFrac == t11 with kTowerFractions (a known duplicate)");
+      check(fabs(a[0] - c1.e) < 1e-3, "e is the cluster energy");
+      check(a[3] >= b[3], "seed fraction higher for one photon than for two");
+      float t3[kNVarMax];
+      ClusterInput noTowers = c1;
+      noTowers.nTow = 0;
+      noTowers.towerE = 0;
+      noTowers.towerRow = 0;
+      noTowers.towerCol = 0;
+      check(compute(3, noTowers, t3) == 0, "set 3 refuses with no tower list (not usable on picoDst)");
    }
 
    float a[kNVarMax], b[kNVarMax];

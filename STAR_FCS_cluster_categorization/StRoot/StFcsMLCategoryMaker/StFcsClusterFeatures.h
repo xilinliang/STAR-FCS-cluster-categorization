@@ -30,20 +30,31 @@ namespace StFcsClusterFeatures {
 
 const int kNVarMax = 34;
 const int kNW5 = 5;  // 5x5 tower window used by the 34-variable set
+const int kNW3 = 3;  // 3x3 tower window used by set 3
 
-// Tower energies (34-variable set) as fractions of the cluster energy instead
-// of raw GeV. Raw energies make the model learn the energy spectrum of the
+// Tower energies (sets 3 and 34) as fractions of the cluster energy instead of
+// raw GeV. Raw energies make the model learn the energy spectrum of the
 // training sample, which is the first thing that differs between the fast
 // simulator and data.
+//
+// NOTE for set 3: with fractions on and the window centred on the seed tower,
+// the central cell t11 IS seedFrac, exactly. The two inputs are the same
+// number. That is harmless for a BDT but it wastes an input and it makes the
+// TMVA variable ranking misleading. If you would rather spend that slot on new
+// information, swap seedFrac for the energy outside the 3x3 - see the comment
+// at out[3] in compute().
 const bool kTowerFractions = true;
 
 // Logarithmic weight offset for the dispersion variable:
 //   w_i = max(0, kW0 + ln(E_i/E))
 const double kW0 = 4.5;
 
+// Set ids are NOT variable counts - set 3 means "the 3x3 set" and has 13
+// variables, the same count as set 13 but different content.
 inline int nVar(int set) {
    if (set == 34) return 34;
    if (set == 6) return 6;
+   if (set == 3) return 13;  // 9 tower energies + e + sigmaMax + sigmaMin + seedFrac
    return 13;
 }
 
@@ -53,6 +64,12 @@ inline const char** varNames(int set) {
    // cluster's tower list is not stored. Train on MuDst with set 6 and the
    // model applies unchanged to picoDst input.
    static const char* n6[6] = {"logE", "nTowers", "sigmaMax", "sigmaMin", "sigmaRatio", "theta"};
+   // set 3: the raw 3x3 shower shape plus the four scalars that the 3x3 alone
+   // cannot supply (absolute scale, and the rotation-invariant widths)
+   static const char* n3[13] = {"e",   "sigmaMax", "sigmaMin", "seedFrac",
+                                "t00", "t01", "t02",
+                                "t10", "t11", "t12",
+                                "t20", "t21", "t22"};
    static const char* n13[13] = {"logE",     "nTowers", "sigmaMax", "sigmaMin", "sigmaRatio",
                                  "theta",    "seedFrac", "e2Frac",  "e1e2Asym", "sigX",
                                  "sigY",     "sigXY",   "nNeighbor"};
@@ -66,6 +83,7 @@ inline const char** varNames(int set) {
                                  "eOut"};
    if (set == 34) return n34;
    if (set == 6) return n6;
+   if (set == 3) return n3;
    return n13;
 }
 
@@ -114,6 +132,50 @@ inline int compute(int set, const ClusterInput& c, float* out) {
       out[4] = (c.sigmaMax > 0) ? c.sigmaMin / c.sigmaMax : 0.0;
       out[5] = c.theta;
       return 6;
+   }
+
+   if (set == 3) {
+      // ----------------------------------------------------------------- 3
+      //   0  e         cluster energy [GeV] - the only absolute scale here
+      //   1  sigmaMax  major-axis width  (rotation invariant, so it sees a
+      //   2  sigmaMin  minor-axis width   split the 3x3 cannot express)
+      //   3  seedFrac  e1 / E
+      //   4..12  t00..t22  3x3 tower energies around the SEED tower, row major,
+      //          (dr,dc) from (-1,-1) to (+1,+1), cluster towers only,
+      //          divided by E when kTowerFractions
+      //
+      // To spend slot 3 on something the 3x3 does not already contain, replace
+      // the seedFrac line below with the energy outside the window:
+      //     out[3] = (c.e - e3x3) / c.e;   // and rename the variable to eOut
+      // With kTowerFractions on, seedFrac and t11 are the same number.
+      int seedRow = 0, seedCol = 0;
+      double e1 = -1;
+      for (int k = 0; k < c.nTow; k++) {
+         if (c.towerE[k] > e1) {
+            e1 = c.towerE[k];
+            seedRow = c.towerRow[k];
+            seedCol = c.towerCol[k];
+         }
+      }
+      if (e1 <= 0) return 0;
+
+      const int half3 = kNW3 / 2;
+      for (int k = 0; k < c.nTow; k++) {
+         const double he = c.towerE[k];
+         if (he <= 0) continue;
+         const int dr = c.towerRow[k] - seedRow;
+         const int dc = c.towerCol[k] - seedCol;
+         if (abs(dr) > half3 || abs(dc) > half3) continue;
+         out[4 + (dr + half3) * kNW3 + (dc + half3)] = he;
+      }
+
+      out[0] = c.e;
+      out[1] = c.sigmaMax;
+      out[2] = c.sigmaMin;
+      out[3] = e1 / c.e;
+      if (kTowerFractions)
+         for (int i = 4; i < 13; i++) out[i] /= c.e;
+      return 13;
    }
 
    if (set != 34) {
