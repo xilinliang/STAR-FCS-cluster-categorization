@@ -341,7 +341,7 @@ The workflow, then:
 root4star -b -q 'trainTMVA.C("feat.root","FcsCat",6)'
 
 # look at pico input with no model at all, first
-root4star -b -q 'runPicoDst_ml.C("pi0.e30.vz0.run3.picoDst.root",-1,0)'
+root4star -b -q 'runPicoDst_ml.C("pi0.e30.vz0.all.picoDst.root",-1,0)'
 
 # then apply
 root4star -b -q 'runPicoDst_ml.C("pi0...root",-1,1,"weights/FcsCat6_BDTG.weights.xml")'

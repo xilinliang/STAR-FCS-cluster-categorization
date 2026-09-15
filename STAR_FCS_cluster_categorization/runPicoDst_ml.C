@@ -1,6 +1,6 @@
 // runPicoDst_ml.C - apply the cluster categorization to StPicoDst input.
 //
-//   root4star -b -q 'runPicoDst_ml.C("pi0.e30.vz0.run3.picoDst.root",-1,1,"weights/FcsCat6_BDTG.weights.xml")'
+//   root4star -b -q 'runPicoDst_ml.C("pi0.e30.vz0.all.picoDst.root",-1,1,"weights/FcsCat6_BDTG.weights.xml")'
 //
 // The input may be a single .picoDst.root file or a .list of them; StPicoDstMaker
 // takes either.
@@ -20,7 +20,7 @@
 //
 // author: generated for Xilin Liang
 
-void runPicoDst_ml(const char* input = "pi0.e30.vz0.run3.picoDst.root",
+void runPicoDst_ml(const char* input = "pi0.e30.vz0.all.picoDst.root",
                    Int_t nevt = -1,
                    int withModel = 0,
                    const char* weightFile = "weights/FcsCat6_BDTG.weights.xml",
