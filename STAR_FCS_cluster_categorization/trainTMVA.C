@@ -1,8 +1,17 @@
 // trainTMVA.C - train the FCS ECal cluster category classifier with TMVA.
 //
 // Run it with the SAME ROOT that root4star uses, i.e. inside the SL7 container
-// after starver:
-//     root4star -b -q 'trainTMVA.C("fcsEcalClusterFeatures.root","FcsCat",13)'
+// after starver. Compile it with ACLiC - note the trailing '+':
+//
+//     root4star -b -q 'trainTMVA.C+("fcsEcalClusterFeatures.root","FcsCat",13)'
+//
+// The '+' matters. Interpreted, this macro goes through CINT, which parses
+// namespaces and inline functions in StFcsClusterFeatures.h only
+// approximately; ACLiC hands it to the real compiler instead - the same one
+// cons uses - so the feature code that runs here is the code that runs in the
+// makers. Without the '+' you may get a bare
+//     Error: Too many '}' tmpfile:NN
+// which is CINT giving up on the parse, not a problem with your input file.
 // TMVA weight XML is not guaranteed to be readable across ROOT major versions,
 // and a weight file trained in some other ROOT is the classic way to lose a week.
 //
@@ -32,15 +41,12 @@
 //
 // author: generated for Xilin Liang
 
-#include "RVersion.h"
 #include "TFile.h"
+#include "TString.h"
 #include "TSystem.h"
 #include "TTree.h"
 #include "TMVA/Factory.h"
 #include "TMVA/Tools.h"
-#if ROOT_VERSION_CODE >= ROOT_VERSION(6, 8, 0)
-#include "TMVA/DataLoader.h"
-#endif
 
 #include "StRoot/StFcsMLCategoryMaker/StFcsClusterFeatures.h"
 
@@ -163,18 +169,15 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
        job, fout,
        "!V:!Silent:Color:DrawProgressBar:Transformations=I;N:AnalysisType=multiclass");
 
-#if ROOT_VERSION_CODE >= ROOT_VERSION(6, 8, 0)
-   TMVA::DataLoader* dl = new TMVA::DataLoader("dataset");
-   for (int i = 0; i < NVAR; i++) dl->AddVariable(varname[i], 'F');
-   for (int c = 0; c < 3; c++) dl->AddTree(t[c], clsname[c]);
-   dl->PrepareTrainingAndTestTree("", "SplitMode=Random:NormMode=NumEvents:!V");
-   factory->BookMethod(dl, TMVA::Types::kBDT, "BDTG",
-                       "!H:!V:NTrees=600:MaxDepth=4:BoostType=Grad:Shrinkage=0.10:"
-                       "UseBaggedBoost:BaggedSampleFraction=0.5:nCuts=40");
-   factory->BookMethod(dl, TMVA::Types::kMLP, "MLP",
-                       "!H:!V:NeuronType=tanh:NCycles=600:HiddenLayers=N+5,N:"
-                       "TestRate=5:EstimatorType=CE:UseRegulator:VarTransform=Norm");
-#else
+   // ROOT 5 TMVA API: the Factory owns the variables and the trees directly.
+   // There is deliberately no #if ROOT_VERSION here - CINT mishandles
+   // preprocessor branches inside a function body and reports
+   //   Error: Too many '}' tmpfile:NN
+   // which is a parse failure, not a problem with your input file. STAR DEV is
+   // ROOT 5.34.38. On ROOT 6.08+ the same calls move to a TMVA::DataLoader:
+   //   TMVA::DataLoader* dl = new TMVA::DataLoader("dataset");
+   //   dl->AddVariable(...); dl->AddTree(...); dl->PrepareTrainingAndTestTree(...);
+   //   factory->BookMethod(dl, TMVA::Types::kBDT, "BDTG", "...");
    for (int i = 0; i < NVAR; i++) factory->AddVariable(varname[i], 'F');
    for (int c = 0; c < 3; c++) factory->AddTree(t[c], clsname[c]);
    factory->PrepareTrainingAndTestTree("", "SplitMode=Random:NormMode=NumEvents:!V");
@@ -184,7 +187,6 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    factory->BookMethod(TMVA::Types::kMLP, "MLP",
                        "!H:!V:NeuronType=tanh:NCycles=600:HiddenLayers=N+5,N:"
                        "TestRate=5:EstimatorType=CE:UseRegulator:VarTransform=Norm");
-#endif
 
    factory->TrainAllMethods();
    factory->TestAllMethods();
