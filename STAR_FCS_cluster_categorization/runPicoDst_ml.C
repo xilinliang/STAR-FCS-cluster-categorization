@@ -26,15 +26,14 @@ void runPicoDst_ml(const char* input = "pi0.e30.vz0.run3.picoDst.root",
                    const char* weightFile = "weights/FcsCat6_BDTG.weights.xml",
                    const char* outFile = "fcsPicoCategory.root",
                    const char* tmvaMethod = "BDTG") {
-   gROOT->Macro("LoadLogger.C");
-   gSystem->Load("St_base");
-   gSystem->Load("StChain");
-   gSystem->Load("StUtilities");
-   gSystem->Load("StBFChain");
-   gSystem->Load("StIOMaker");
-   gSystem->Load("StarClassLibrary");
-   gSystem->Load("StTreeMaker");
-   gSystem->Load("StEvent");
+   // StPicoDstMaker links against StMuDSTMaker - it references StMuDst statics
+   // such as mMuFmsCollection - so the MuDst libraries have to be loaded even
+   // when only READING a picoDst. Loading StPicoDstMaker without them fails with
+   //   dlopen error: ... undefined symbol: _ZN7StMuDst16mMuFmsCollectionE
+   // loadSharedLibraries.C pulls in that whole set, exactly as runMudst.C does.
+   gROOT->Macro("Load.C");
+   gROOT->Macro("$STAR/StRoot/StMuDSTMaker/COMMON/macros/loadSharedLibraries.C");
+
    gSystem->Load("StPicoEvent");
    gSystem->Load("StPicoDstMaker");
    if (withModel) gSystem->Load("libTMVA");  // must precede our library
