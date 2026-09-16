@@ -35,6 +35,10 @@ static_assert(StFcsPicoCategoryMaker::kNVarMax == StFcsClusterFeatures::kNVarMax
 ClassImp(StFcsPicoCategoryMaker)
 #endif
 
+    // definition for the in-class-initialised static constant - see the note in
+    // StFcsClusterFeatureMaker.cxx
+    const int StFcsPicoCategoryMaker::kNVarMax;
+
     StFcsPicoCategoryMaker::StFcsPicoCategoryMaker(StPicoDstMaker* picoMaker, const Char_t* name)
     : StMaker(name),
       mPicoDstMaker(picoMaker),

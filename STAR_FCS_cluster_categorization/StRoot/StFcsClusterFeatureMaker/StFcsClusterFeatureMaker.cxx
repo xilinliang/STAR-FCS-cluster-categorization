@@ -27,7 +27,19 @@
 ClassImp(StFcsClusterFeatureMaker)
 #endif
 
-    StFcsClusterFeatureMaker::StFcsClusterFeatureMaker(const Char_t* name) : StMaker(name) {}
+    // Out-of-class definitions for the static constants declared in the header.
+    // An in-class initialiser is a declaration, not a definition: the moment one
+    // of these is odr-used - std::min binds its arguments BY REFERENCE, so it is
+    // - the linker wants a symbol, and .so loading fails with
+    //   undefined symbol: _ZN24StFcsClusterFeatureMaker7kMaxTrkE
+    // cons links the library without complaint, so this only shows up at
+    // dlopen time in the macro. (C++17 would make these implicitly inline;
+    // gcc 4.8 with -std=c++0x does not.)
+    const int StFcsClusterFeatureMaker::kNW;
+const int StFcsClusterFeatureMaker::kNPix;
+const int StFcsClusterFeatureMaker::kMaxTrk;
+
+StFcsClusterFeatureMaker::StFcsClusterFeatureMaker(const Char_t* name) : StMaker(name) {}
 
 StFcsClusterFeatureMaker::~StFcsClusterFeatureMaker() {}
 

@@ -37,6 +37,11 @@ static_assert(StFcsMLCategoryMaker::kNVarMax == StFcsClusterFeatures::kNVarMax,
 ClassImp(StFcsMLCategoryMaker)
 #endif
 
+    // definition for the in-class-initialised static constant, so that any
+    // odr-use of it resolves at dlopen time rather than failing with
+    //   undefined symbol: _ZN20StFcsMLCategoryMaker8kNVarMaxE
+    const int StFcsMLCategoryMaker::kNVarMax;
+
     StFcsMLCategoryMaker::StFcsMLCategoryMaker(const Char_t* name)
     : StMaker(name),
       mFcsDb(0),
