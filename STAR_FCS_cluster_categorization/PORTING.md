@@ -75,6 +75,7 @@ StRoot/StFcsMLCategoryMaker/       apply the trained model, set category() (MuDs
 StRoot/StFcsPicoCategoryMaker/     apply the model to StPicoDst input
 trainTMVA.C                        TMVA multiclass training on the dumped tree
 testFeatures.C                     smoke test for the feature definitions
+runFzd_ml.C                        TRAINING sample, from the GEANT .fzd
 runMudst_ml.C                      your runMudst.C with both makers wired in
 runPicoDst_ml.C                    the same, for picoDst input
 BUILD.md                           SL7 container, cons, and job submission
@@ -247,11 +248,17 @@ seed tower, plus a mask of which towers clustering assigned to this cluster. The
 
 ## 4. Sequence I would actually follow
 
-1. **Dump features on simulation.** `mode=0` in `runMudst_ml.C`, on a sample with
-   `StFcsFastSimulatorMaker` in the chain — it calls `addGeantTrack(track_p, de)`
-   on every hit, which is where the labels come from. Also dump a data sample:
-   you need the data/MC comparison of the input distributions before you trust
-   anything trained on simulation.
+1. **Dump features from the GEANT `.fzd`, with `runFzd_ml.C`** — not from a
+   MuDst. The labels come from `StFcsHit::getGeantTracks()`, filled only by
+   `StFcsFastSimulatorMaker` as it converts `g2t_wca_hit`, plus the `g2t_track`
+   table for pid and parentage. **Neither survives into a MuDst or a picoDst**:
+   `StMuFcsHit` and `StPicoFcsHit` store detector id, id, adc and energy, and
+   nothing about which GEANT track deposited the energy. A feature dump made
+   from a MuDst has features with `truthNPhoton == -1` on every cluster, and
+   `trainTMVA.C` then skips all of them — with only the "not enough labelled
+   clusters" line to warn you. MuDst and picoDst are for *applying* a model.
+   Also dump a data sample for the data/MC comparison of the input
+   distributions, before trusting anything trained on simulation.
 2. **Check the label definition.** The class assignment at the top of the event
    loop in `trainTMVA.C` calls a cluster "2 photons" when ≥2 photons each deposit
    >10% of the cluster energy (the 10% lives in `StFcsClusterFeatureMaker`'s
