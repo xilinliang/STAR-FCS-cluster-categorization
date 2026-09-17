@@ -72,6 +72,8 @@ void runFzd_ml(const char* fzd = "pi0.e30.vz0.run1.fzd",
    feat->setOutputFile(outFile);
    feat->setEnergyThreshold(clusterEmin);
    feat->setSaveTruth(saveTruth);
+   feat->setSaveMcTruth(1);      // generator-level photons -> mcLabel, mcSep
+   feat->setMcMatchRadius(11.0); // cm, about two ECal towers
    if (feat->Init() != kStOK) {
       printf("StFcsClusterFeatureMaker::Init failed\n");
       return;

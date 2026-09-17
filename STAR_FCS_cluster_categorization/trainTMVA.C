@@ -74,7 +74,7 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    const int NW = 11;  // StFcsClusterFeatureMaker::kNW
    Float_t e, x, y, sigmaMin, sigmaMax, theta, xw, yw, truthPurity;
    Float_t img[NW * NW], mask[NW * NW];
-   Int_t nTowers, nNeighbor, seedRow, seedCol, catStar, truthNPhoton;
+   Int_t nTowers, nNeighbor, seedRow, seedCol, catStar, truthNPhoton, mcLabel;
    in->SetBranchAddress("e", &e);
    in->SetBranchAddress("x", &x);
    in->SetBranchAddress("y", &y);
@@ -91,6 +91,9 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    in->SetBranchAddress("seedCol", &seedCol);
    in->SetBranchAddress("catStar", &catStar);
    in->SetBranchAddress("truthNPhoton", &truthNPhoton);
+   // generator-level label; -1 on feature files written before it existed
+   mcLabel = -1;
+   if (in->GetBranch("mcLabel")) in->SetBranchAddress("mcLabel", &mcLabel);
    in->SetBranchAddress("truthPurity", &truthPurity);
 
    // ------------------------------------------------- flat training trees
@@ -113,18 +116,30 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    for (Long64_t i = 0; i < n; i++) {
       in->GetEntry(i);
       if (e < eMin) continue;
-      if (truthNPhoton < 0) continue;  // no truth: data, or truth not stored
 
-      int cls;
-      if (truthNPhoton >= 2) {
-         cls = 2;
-      } else if (truthNPhoton == 1 && truthPurity >= purityCut) {
-         cls = 1;
-      } else if (truthNPhoton == 0 && truthPurity >= purityCut) {
-         cls = 0;  // a clean hadronic / non-photon cluster
-      } else {
-         continue;  // impure, unlabelled
+      // LABEL SOURCE. mcLabel is generator level: it counts the GENERATED
+      // photons projecting onto this cluster, so it does not care how GEANT
+      // shared the energy deposits between primary and shower tracks. Prefer it
+      // whenever it is present, and note that it needs no purity cut - which
+      // matters for hadronic clusters, whose energy is spread over many tracks
+      // so their leading-track purity is naturally low and the old rule threw
+      // most of them away, leaving class 0 nearly empty.
+      //
+      // truthNPhoton (hit level) is the fallback for feature files made before
+      // the generator-level branches existed.
+      int cls = -1;
+      if (mcLabel >= 0) {
+         cls = mcLabel;  // 0, 1 or 2 already
+      } else if (truthNPhoton >= 0) {
+         if (truthNPhoton >= 2) {
+            cls = 2;
+         } else if (truthNPhoton == 1 && truthPurity >= purityCut) {
+            cls = 1;
+         } else if (truthNPhoton == 0 && truthPurity >= purityCut) {
+            cls = 0;
+         }
       }
+      if (cls < 0) continue;  // no usable truth: data, or an impure cluster
 
       // rebuild the cluster's towers from the stored image and mask
       int nTow = 0;

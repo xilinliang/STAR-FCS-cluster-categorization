@@ -16,6 +16,9 @@
 #define STAR_StFcsClusterFeatureMaker_HH
 
 #include <string>
+#ifndef __CINT__
+#include <vector>
+#endif
 
 #include "StMaker.h"
 
@@ -31,6 +34,7 @@ class StFcsClusterFeatureMaker : public StMaker {
    static const int kNW = 11;
    static const int kNPix = kNW * kNW;
    static const int kMaxTrk = 16;
+   static const int kMaxMc = 8;  // generator-level photons kept per cluster
 
    StFcsClusterFeatureMaker(const Char_t* name = "FcsClusFeat");
    ~StFcsClusterFeatureMaker();
@@ -43,10 +47,18 @@ class StFcsClusterFeatureMaker : public StMaker {
    void setEnergyThreshold(float e) { mEmin = e; }        // min cluster energy to store
    void setTowerThreshold(float e) { mTowerEmin = e; }    // min tower energy into the image
    void setSaveTruth(int v) { mSaveTruth = v; }           // 1 = try to read g2t tables
+   // Generator-level ("particle level") truth: collect the generated photons
+   // from g2t_track/g2t_vertex, project them onto the ECal plane and match them
+   // to clusters. Independent of how GEANT attributed the energy deposits, so
+   // it gives a label even if hit-level attribution goes to shower secondaries.
+   void setSaveMcTruth(int v) { mSaveMcTruth = v; }
+   void setMcMatchRadius(float cm) { mMcMatchR = cm; }    // photon-to-cluster match, cm
 
   private:
    void resetBranches();
    void fillTruth(class StFcsCluster* clu);
+   void collectMcPhotons();                               // once per event
+   void matchMcPhotons(class StFcsCluster* clu, int det);  // per cluster
 
    StFcsDb* mFcsDb = 0;
    StFcsCollection* mFcsColl = 0;
@@ -87,6 +99,42 @@ class StFcsClusterFeatureMaker : public StMaker {
    Float_t bTruthPurity;                    // leading track energy / sum of track energies
 
    float mTruthFrac = 0.10;
+
+   // ---- generator-level truth (particle level), simulation only ----
+   // Filled from g2t_track + g2t_vertex, independent of the hit attribution.
+   // mcLabel is the one to train on when it is >= 0.
+   Int_t bMcLabel;          // 0 = no photon, 1 = one photon, 2 = two or more; -1 = no MC
+   Int_t bNMcPhoton;        // generated photons projecting inside mMcMatchR of this cluster
+   Int_t bMcTrkId[kMaxMc];  // g2t track id of each matched photon
+   Int_t bMcParent[kMaxMc]; // g2t id of its parent track (the pi0, for a pi0 gun)
+   Int_t bMcParentPid;      // GEANT pid of the leading photon's parent, 0 if none
+   Float_t bMcE[kMaxMc];    // generated energy of each matched photon [GeV]
+   Float_t bMcDr[kMaxMc];   // its projected distance from the cluster centroid [cm]
+   Float_t bMcX[kMaxMc];    // projected position on the ECal plane, STAR frame [cm]
+   Float_t bMcY[kMaxMc];
+   Float_t bMcSep;          // separation of the two leading matched photons [cm], -1 if <2
+   Float_t bMcSepCell;      // the same in tower units - the merge-transition variable
+   Float_t bMcZgg;          // |E1-E2|/(E1+E2) of the two leading matched photons, -1 if <2
+   Int_t bNMcPhotonEvent;   // generated photons in the event reaching either ECal half
+
+   int mSaveMcTruth = 1;
+   float mMcMatchR = 11.0;  // cm, about two ECal towers
+
+   // hidden from CINT and kept last - rootcint cannot digest a nested struct
+   // plus std::vector in a dictionary header
+#ifndef __CINT__
+   struct McPhoton {
+      int id;
+      int parent;
+      int parentPid;
+      float e;
+      float p[3];   // generated momentum
+      float v[3];   // start vertex, STAR frame [cm]
+      float proj[2][2];  // [det 0/1][x,y] projection onto that ECal plane [cm]
+      int projOk[2];
+   };
+   std::vector<McPhoton> mMcPhotons;
+#endif
 
 #ifndef SKIPDefImp
    ClassDef(StFcsClusterFeatureMaker, 0)

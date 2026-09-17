@@ -4,6 +4,7 @@
 #include "StFcsClusterFeatureMaker.h"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <vector>
 
@@ -22,6 +23,7 @@
 #include "TFile.h"
 #include "TTree.h"
 #include "tables/St_g2t_track_Table.h"
+#include "tables/St_g2t_vertex_Table.h"
 
 #ifndef SKIPDefImp
 ClassImp(StFcsClusterFeatureMaker)
@@ -38,6 +40,7 @@ ClassImp(StFcsClusterFeatureMaker)
     const int StFcsClusterFeatureMaker::kNW;
 const int StFcsClusterFeatureMaker::kNPix;
 const int StFcsClusterFeatureMaker::kMaxTrk;
+const int StFcsClusterFeatureMaker::kMaxMc;
 
 StFcsClusterFeatureMaker::StFcsClusterFeatureMaker(const Char_t* name) : StMaker(name) {}
 
@@ -106,6 +109,21 @@ Int_t StFcsClusterFeatureMaker::Init() {
    mTree->Branch("truthSameParent", &bTruthSameParent, "truthSameParent/I");
    mTree->Branch("truthPurity", &bTruthPurity, "truthPurity/F");
 
+   // generator-level ("particle level") truth
+   mTree->Branch("mcLabel", &bMcLabel, "mcLabel/I");
+   mTree->Branch("nMcPhoton", &bNMcPhoton, "nMcPhoton/I");
+   mTree->Branch("mcTrkId", bMcTrkId, "mcTrkId[nMcPhoton]/I");
+   mTree->Branch("mcParent", bMcParent, "mcParent[nMcPhoton]/I");
+   mTree->Branch("mcParentPid", &bMcParentPid, "mcParentPid/I");
+   mTree->Branch("mcE", bMcE, "mcE[nMcPhoton]/F");
+   mTree->Branch("mcDr", bMcDr, "mcDr[nMcPhoton]/F");
+   mTree->Branch("mcX", bMcX, "mcX[nMcPhoton]/F");
+   mTree->Branch("mcY", bMcY, "mcY[nMcPhoton]/F");
+   mTree->Branch("mcSep", &bMcSep, "mcSep/F");
+   mTree->Branch("mcSepCell", &bMcSepCell, "mcSepCell/F");
+   mTree->Branch("mcZgg", &bMcZgg, "mcZgg/F");
+   mTree->Branch("nMcPhotonEvent", &bNMcPhotonEvent, "nMcPhotonEvent/I");
+
    return kStOK;
 }
 
@@ -131,6 +149,157 @@ void StFcsClusterFeatureMaker::resetBranches() {
    bTruthPurity = -1.0;
    bChi2Ndf1 = 0.0;
    bChi2Ndf2 = 0.0;
+   bMcLabel = -1;
+   bNMcPhoton = 0;
+   bMcParentPid = 0;
+   bMcSep = -1.0;
+   bMcSepCell = -1.0;
+   bMcZgg = -1.0;
+}
+
+//-----------------------------------------------------------------------------
+// Generator-level truth, step 1 of 2: collect the generated photons of the
+// event and project each onto both ECal planes.
+//
+// "Generated" here means a GEANT track that is not a shower product: the
+// photons from a pi0 gun are GEANT tracks (the pi0 decays in GEANT), so
+// selecting eg_label > 0 alone would miss them. is_shower == 0 keeps the pi0
+// daughters while rejecting the e+/e- of the electromagnetic cascade.
+//
+// The projection is a ray-plane intersection using StFcsDb's own description of
+// each ECal half - getDetectorOffset() for a point on it, getNormal() for its
+// orientation - so the detector tilt is handled rather than assumed away.
+void StFcsClusterFeatureMaker::collectMcPhotons() {
+   mMcPhotons.clear();
+   bNMcPhotonEvent = 0;
+   if (!mSaveMcTruth) return;
+
+   St_g2t_track* trkTable = (St_g2t_track*)GetDataSet("g2t_track");
+   if (!trkTable) trkTable = (St_g2t_track*)GetDataSet("geant/g2t_track");
+   St_g2t_vertex* vtxTable = (St_g2t_vertex*)GetDataSet("g2t_vertex");
+   if (!vtxTable) vtxTable = (St_g2t_vertex*)GetDataSet("geant/g2t_vertex");
+   if (!trkTable || !vtxTable) return;  // not a simulation chain: stays empty
+
+   g2t_track_st* trk = trkTable->GetTable();
+   g2t_vertex_st* vtx = vtxTable->GetTable();
+   const int ntrk = trkTable->GetNRows();
+   const int nvtx = vtxTable->GetNRows();
+   if (!trk || !vtx) return;
+
+   // detector planes, once
+   StThreeVectorD p0[2], nrm[2];
+   for (int det = 0; det < 2; det++) {
+      p0[det] = mFcsDb->getDetectorOffset(det);
+      nrm[det] = mFcsDb->getNormal(det);
+   }
+
+   for (int i = 0; i < ntrk; i++) {
+      if (trk[i].ge_pid != 1) continue;   // GEANT3 pid 1 = gamma
+      if (trk[i].is_shower != 0) continue;  // drop cascade products
+      if (trk[i].e <= 0) continue;
+
+      // start vertex
+      const int ivp = trk[i].start_vertex_p;
+      int iv = -1;
+      for (int v = 0; v < nvtx; v++) {
+         if (vtx[v].id == ivp) {
+            iv = v;
+            break;
+         }
+      }
+      if (iv < 0) continue;
+
+      McPhoton ph;
+      ph.id = trk[i].id;
+      ph.parent = trk[i].next_parent_p;
+      ph.parentPid = 0;
+      for (int j = 0; j < ntrk; j++) {
+         if (trk[j].id == ph.parent) {
+            ph.parentPid = trk[j].ge_pid;
+            break;
+         }
+      }
+      ph.e = trk[i].e;
+      for (int k = 0; k < 3; k++) {
+         ph.p[k] = trk[i].p[k];
+         ph.v[k] = vtx[iv].ge_x[k];
+      }
+
+      const StThreeVectorD v(ph.v[0], ph.v[1], ph.v[2]);
+      const StThreeVectorD dir(ph.p[0], ph.p[1], ph.p[2]);
+      int reaches = 0;
+      for (int det = 0; det < 2; det++) {
+         ph.projOk[det] = 0;
+         ph.proj[det][0] = -9999.0;
+         ph.proj[det][1] = -9999.0;
+         const double nd = nrm[det].dot(dir);
+         if (fabs(nd) < 1e-9) continue;               // parallel to the plane
+         const double t = nrm[det].dot(p0[det] - v) / nd;
+         if (t <= 0) continue;                        // plane is behind the photon
+         const StThreeVectorD hit = v + dir * t;
+         ph.proj[det][0] = hit.x();
+         ph.proj[det][1] = hit.y();
+         ph.projOk[det] = 1;
+         reaches = 1;
+      }
+      if (reaches) bNMcPhotonEvent++;
+      mMcPhotons.push_back(ph);
+   }
+}
+
+//-----------------------------------------------------------------------------
+// Generator-level truth, step 2 of 2: match the collected photons to one
+// cluster and fill the per-cluster branches.
+//
+// mcLabel is what to train on: it says how many GENERATED photons point at this
+// cluster, with no dependence on how GEANT shared the energy deposits out among
+// tracks. For a pi0 gun, mcSep / mcSepCell is the variable that maps the merge
+// transition - the separation at which two photons stop making two clusters.
+void StFcsClusterFeatureMaker::matchMcPhotons(StFcsCluster* clu, int det) {
+   if (!mSaveMcTruth || mMcPhotons.empty()) return;
+
+   const StThreeVectorD cpos = mFcsDb->getStarXYZfromColumnRow(det, clu->x(), clu->y());
+
+   // distance-ordered list of photons projecting within mMcMatchR
+   std::vector<std::pair<float, int> > near;
+   for (size_t i = 0; i < mMcPhotons.size(); i++) {
+      if (!mMcPhotons[i].projOk[det]) continue;
+      const double dx = mMcPhotons[i].proj[det][0] - cpos.x();
+      const double dy = mMcPhotons[i].proj[det][1] - cpos.y();
+      const double dr = sqrt(dx * dx + dy * dy);
+      if (dr > mMcMatchR) continue;
+      near.push_back(std::make_pair((float)dr, (int)i));
+   }
+   std::sort(near.begin(), near.end());
+
+   bNMcPhoton = std::min((int)near.size(), (int)kMaxMc);
+   for (int i = 0; i < bNMcPhoton; i++) {
+      const McPhoton& ph = mMcPhotons[near[i].second];
+      bMcTrkId[i] = ph.id;
+      bMcParent[i] = ph.parent;
+      bMcE[i] = ph.e;
+      bMcDr[i] = near[i].first;
+      bMcX[i] = ph.proj[det][0];
+      bMcY[i] = ph.proj[det][1];
+   }
+   if (bNMcPhoton > 0) bMcParentPid = mMcPhotons[near[0].second].parentPid;
+
+   if ((int)near.size() >= 2) {
+      const McPhoton& a = mMcPhotons[near[0].second];
+      const McPhoton& b = mMcPhotons[near[1].second];
+      const double dx = a.proj[det][0] - b.proj[det][0];
+      const double dy = a.proj[det][1] - b.proj[det][1];
+      bMcSep = sqrt(dx * dx + dy * dy);
+      const float xw = mFcsDb->getXWidth(det);
+      bMcSepCell = (xw > 0) ? bMcSep / xw : -1.0;
+      bMcZgg = (a.e + b.e > 0) ? fabs(a.e - b.e) / (a.e + b.e) : -1.0;
+   }
+
+   // 0 = no generated photon points here (hadronic, or junk)
+   // 1 = one photon      -> single-photon cluster
+   // 2 = two or more     -> merged
+   bMcLabel = (int)near.size();
+   if (bMcLabel > 2) bMcLabel = 2;
 }
 
 //-----------------------------------------------------------------------------
@@ -152,6 +321,9 @@ Int_t StFcsClusterFeatureMaker::Make() {
       bRun = event->info()->runId();
       bEvent = event->info()->id();
    }
+
+   // generator-level photons, once per event, before the cluster loop
+   collectMcPhotons();
 
    for (int det = 0; det < 2; det++) {  // ECal north(0) and south(1) only
       if (mFcsDb->ecalHcalPres(det) != 0) continue;
@@ -273,6 +445,7 @@ Int_t StFcsClusterFeatureMaker::Make() {
          }
 
          if (mSaveTruth) fillTruth(clu);
+         matchMcPhotons(clu, det);
 
          mTree->Fill();
       }
