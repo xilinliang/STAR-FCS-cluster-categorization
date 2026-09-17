@@ -113,9 +113,16 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    Long64_t n = in->GetEntries();
    Long64_t kept[3] = {0, 0, 0};
 
+   // accounting, so that an empty training sample explains itself
+   const bool haveMcBranch = (in->GetBranch("mcLabel") != 0);
+   Long64_t nBelowE = 0, nNoTruth = 0, nImpure = 0, nNoTowers = 0;
+
    for (Long64_t i = 0; i < n; i++) {
       in->GetEntry(i);
-      if (e < eMin) continue;
+      if (e < eMin) {
+         nBelowE++;
+         continue;
+      }
 
       // LABEL SOURCE. mcLabel is generator level: it counts the GENERATED
       // photons projecting onto this cluster, so it does not care how GEANT
@@ -139,7 +146,13 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
             cls = 0;
          }
       }
-      if (cls < 0) continue;  // no usable truth: data, or an impure cluster
+      if (cls < 0) {
+         if (mcLabel < 0 && truthNPhoton < 0)
+            nNoTruth++;  // no truth at all on this cluster
+         else
+            nImpure++;   // truth present but the purity cut rejected it
+         continue;
+      }
 
       // rebuild the cluster's towers from the stored image and mask
       int nTow = 0;
@@ -170,13 +183,50 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
       c.towerRow = trow;
       c.towerCol = tcol;
 
-      if (compute(featureSet, c, v) != NVAR) continue;
+      if (compute(featureSet, c, v) != NVAR) {
+         nNoTowers++;
+         continue;
+      }
       t[cls]->Fill();
       kept[cls]++;
    }
-   printf("training sample: other=%lld  1photon=%lld  2photon=%lld\n", kept[0], kept[1], kept[2]);
+   // ------------------------------------------------------------ accounting
+   printf("\n--- where the %lld clusters in %s went ---\n", n, infile);
+   printf("  below eMin = %.2f GeV        : %lld\n", eMin, nBelowE);
+   printf("  no truth on the cluster      : %lld\n", nNoTruth);
+   printf("  truth present, cut by purity : %lld\n", nImpure);
+   printf("  no usable tower list         : %lld\n", nNoTowers);
+   printf("  KEPT  other=%lld  1photon=%lld  2photon=%lld\n", kept[0], kept[1], kept[2]);
+   printf("  label source: %s\n", haveMcBranch ? "mcLabel (generator level)"
+                                               : "truthNPhoton (hit level); no mcLabel branch");
+
+   if (kept[0] + kept[1] + kept[2] == 0) {
+      printf("\nNothing to train on. Reading the numbers above:\n");
+      if (n == 0) {
+         printf("  The tree is empty. The feature dumper ran but wrote no clusters -\n"
+                "  check the ECal cluster count in the job that produced it.\n");
+      } else if (nNoTruth == n - nBelowE) {
+         printf("  Every cluster has no truth. That is what a feature file made from a\n"
+                "  MuDst or a picoDst looks like: StMuFcsHit and StPicoFcsHit carry no\n"
+                "  GEANT track links, and the g2t tables are not in those chains either.\n"
+                "  Produce the training file from the GEANT .fzd instead:\n\n"
+                "    root4star -b -q 'runFzd_ml.C(\"pi0...fzd\",-1,\"feat.root\",\"<geom>\",\"<sdt>\")'\n\n"
+                "  MuDst and picoDst are for applying a trained model, not for training.\n");
+      } else if (nBelowE == n) {
+         printf("  Every cluster is below eMin = %.2f GeV. Lower it, or check the energy\n"
+                "  scale in the dumper.\n", eMin);
+      } else if (nImpure > 0) {
+         printf("  Truth is present but the purity cut rejected everything. Lower\n"
+                "  purityCut, or re-dump with the generator-level branches so mcLabel\n"
+                "  is used instead - it needs no purity cut.\n");
+      }
+      printf("\nStopping before TMVA, which would abort on empty trees.\n");
+      ftmp->Close();
+      return;
+   }
    if (kept[1] < 100 || kept[2] < 100)
-      printf("not enough labelled clusters - check that you ran on simulation with truth\n");
+      printf("  WARNING: thin classes - the model will not be worth much yet\n");
+   printf("\n");
 
    // --------------------------------------------------------------- TMVA
    TFile* fout = TFile::Open(job + ".root", "RECREATE");
