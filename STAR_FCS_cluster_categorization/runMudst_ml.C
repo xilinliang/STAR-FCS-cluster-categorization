@@ -1,7 +1,9 @@
-// runMudst_ml.C - runMudst.C from FCS-ECal-pi0-reconstruction with the two new makers.
+// runMudst_ml.C - MuDst chain for the cluster categorization: dump features, or
+// apply a trained model. Based on runMudst.C from FCS-ECal-pi0-reconstruction,
+// without the pi0 finder - that analysis stays in your own macro.
 //
 //   mode = 0 : dump cluster features for training  (StFcsClusterFeatureMaker after the point maker)
-//   mode = 1 : run the ML category maker between cluster and point makers, then the pi0 finder
+//   mode = 1 : apply the model - ML category maker between cluster and point makers
 //   mode = 2 : both (ML categories applied, features dumped afterwards for QA)
 //
 // Example:
@@ -100,13 +102,20 @@ void runMudst_ml(const char* file = "st_cosmic_adc_22326042_raw_0000005.MuDst.ro
       feat->setSaveTruth(1);   // hit-level truth; a no-op on a MuDst
    }
 
-   gSystem->Load("StVpdCalibMaker");
-   StVpdCalibMaker* vpdCalib = new StVpdCalibMaker();
-   vpdCalib->setMuDstIn();
-
-   gSystem->Load("StFcsPi0FinderForEcal");
-   StFcsPi0FinderForEcal* fcsPi0Finder = new StFcsPi0FinderForEcal();
-   fcsPi0Finder->st(1);
+   // StFcsPi0FinderForEcal is deliberately NOT in this chain. Keep the pi0
+   // analysis in your own runMudst.C, where it belongs: this macro is for
+   // dumping features and for applying the model, and the two have different
+   // inputs anyway - the pi0 finder wants the gain-correction text file, this
+   // one wants a weight file.
+   //
+   // To compare the pi0 mass with and without the ML category, run your own
+   // runMudst.C twice, once with StFcsMLCategoryMaker inserted between
+   // StFcsClusterMaker and StFcsPointMaker and once without. That is the
+   // comparison that matters, and it is cleaner made in the macro that already
+   // produces your calibration histograms.
+   //
+   // StVpdCalibMaker went with it: it was here only to give the pi0 finder a
+   // VPD vertex.
 
    chain->Init();
    chain->EventLoop(start, stop);
