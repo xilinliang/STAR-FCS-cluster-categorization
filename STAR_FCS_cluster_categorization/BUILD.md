@@ -17,6 +17,62 @@ not survive into a MuDst or a picoDst — `StMuFcsHit` and `StPicoFcsHit` store
 detector id, id, adc and energy, and nothing about which track deposited the
 energy. A feature file made from a MuDst has features and no labels.
 
+### How truth level and detector level correspond
+
+They are never matched up between files. Step 1 is a single job that reads the
+generated particles **and reconstructs them**, so both levels are in memory in
+the same event, and the correspondence is made there — per cluster — and frozen
+into `feat.root`:
+
+```
+   pi0.e30.vz0.run1.fzd
+        |
+        |  fzin        St_geant_Maker
+        v
+   TRUTH LEVEL         g2t_track, g2t_vertex
+                       the generated pi0 and its two photons
+        |
+        |  fcsSim      StFcsFastSimulatorMaker
+        |              turns g2t_wca_hit into StFcsHit AND records, per hit,
+        |              which GEANT track deposited the energy
+        v
+   DETECTOR LEVEL      StFcsHit -> StFcsCluster -> StFcsPoint
+                       exactly the reconstruction that runs on real data
+        |
+        |  StFcsClusterFeatureMaker
+        v
+   feat.root           one row per RECONSTRUCTED cluster, carrying the truth
+                       that belongs to that cluster
+```
+
+A row of `feat.root` is therefore a detector-level object (a reconstructed
+cluster: its towers, widths, energy) with truth-level answers attached to it.
+That pairing is what makes it trainable. Two independent mechanisms create it:
+
+- **Hit level.** `StFcsHit::getGeantTracks()` — every tower hit knows which
+  GEANT tracks put energy in it, because the fast simulator wrote that down.
+  Cluster → its hits → the tracks that made them. No matching involved, it is a
+  stored link. This gives `trkPid`, `trkE`, `truthNPhoton`.
+- **Generator level.** The generated photons are projected from their start
+  vertex onto the ECal plane and matched to the cluster centroid within
+  `setMcMatchRadius` (11 cm). This is geometric matching, and it is independent
+  of how GEANT shared the deposits out. This gives `mcLabel`, `mcSep`, `mcZgg`.
+
+Step 4 is a **different dataset and a different purpose**: an already
+reconstructed MuDst or picoDst, where no truth exists or is wanted, and the
+trained model supplies the category that truth supplied during training.
+
+```
+   step 1   .fzd    -> [ truth + reconstruction ] -> feat.root -> model
+   step 4   MuDst   -> [ reconstruction only    ] -> features  -> model -> category
+```
+
+Note what this rules out: you cannot reconstruct the `.fzd` into a MuDst first
+and dump features from that MuDst afterwards. The truth is dropped in the
+conversion, so the pairing above has to happen in the same job that does the
+reconstruction — which is why `runFzd_ml.C` puts the dumper in the chain rather
+than running it later.
+
 | input | carries | use it for |
 |---|---|---|
 | `.fzd` | GEANT record: g2t tables, hits, generated particles | **training samples** |
