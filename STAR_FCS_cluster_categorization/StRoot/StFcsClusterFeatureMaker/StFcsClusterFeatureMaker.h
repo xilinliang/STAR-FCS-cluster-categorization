@@ -54,6 +54,20 @@ class StFcsClusterFeatureMaker : public StMaker {
    void setSaveMcTruth(int v) { mSaveMcTruth = v; }
    void setMcMatchRadius(float cm) { mMcMatchR = cm; }    // photon-to-cluster match, cm
 
+   // ---- injecting generated photons from outside (the MuDst path) ----
+   //
+   // On a .fzd chain this maker reads g2t_track/g2t_vertex itself. On a MuDst
+   // there are no g2t tables, but StMuMcTrack carries the same generator-level
+   // information - it is built from g2t_track_st - so StFcsMuMcTruthMaker reads
+   // it there and pushes the photons in through these two calls, once per
+   // event, before this maker runs. That keeps StMuDSTMaker out of this
+   // package's link dependencies, which matters: an unresolved StMuDst symbol
+   // would make this library fail to dlopen in the .fzd chain, where the MuDst
+   // libraries are not loaded.
+   void clearMcPhotons();
+   void addMcPhoton(int id, int parent, int parentPid, float e,
+                    float px, float py, float pz, float vx, float vy, float vz);
+
   private:
    void resetBranches();
    void fillTruth(class StFcsCluster* clu);
@@ -119,6 +133,7 @@ class StFcsClusterFeatureMaker : public StMaker {
 
    int mSaveMcTruth = 1;
    float mMcMatchR = 11.0;  // cm, about two ECal towers
+   int mMcExternal = 0;     // 1 when photons were injected for this event
 
    // hidden from CINT and kept last - rootcint cannot digest a nested struct
    // plus std::vector in a dictionary header
@@ -134,6 +149,7 @@ class StFcsClusterFeatureMaker : public StMaker {
       int projOk[2];
    };
    std::vector<McPhoton> mMcPhotons;
+   void projectPhoton(McPhoton& ph);  // ray-plane onto both ECal halves
 #endif
 
 #ifndef SKIPDefImp

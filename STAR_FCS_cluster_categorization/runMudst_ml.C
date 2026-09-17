@@ -81,11 +81,23 @@ void runMudst_ml(const char* file = "st_cosmic_adc_22326042_raw_0000005.MuDst.ro
 
    // ---- feature dump, after the point maker so chi2ndf1/chi2ndf2 are filled ----
    if (mode == 0 || mode == 2) {
+      // Generator-level truth FIRST - StChain runs makers in construction
+      // order, and this one has to supply the photons before the dumper uses
+      // them. It finds the dumper by name in Init(), which is why it can be
+      // built first. A MuDst has no hit-to-GEANT-track links, but it does carry
+      // StMuMcTrack, which is built from g2t_track_st and keeps the generated
+      // particles, so mcLabel / mcSep / mcZgg get filled from a MuDst just as
+      // they do from a .fzd. On real data the MC arrays are absent, the maker
+      // says so once in Finish(), and mcLabel stays at -1.
+      gSystem->Load("StFcsMuMcTruthMaker");
+      StFcsMuMcTruthMaker* mcTruth = new StFcsMuMcTruthMaker();
+      mcTruth->setPhotonEnergyThreshold(0.0);
+
       gSystem->Load("StFcsClusterFeatureMaker");
       StFcsClusterFeatureMaker* feat = new StFcsClusterFeatureMaker();
       feat->setOutputFile(Form("%s/%s", outdir, featFile));
       feat->setEnergyThreshold(0.5);
-      feat->setSaveTruth(1);   // no-op on data
+      feat->setSaveTruth(1);   // hit-level truth; a no-op on a MuDst
    }
 
    gSystem->Load("StVpdCalibMaker");

@@ -169,7 +169,65 @@ void StFcsClusterFeatureMaker::resetBranches() {
 // The projection is a ray-plane intersection using StFcsDb's own description of
 // each ECal half - getDetectorOffset() for a point on it, getNormal() for its
 // orientation - so the detector tilt is handled rather than assumed away.
+// Project one photon onto both ECal halves. The plane of each half comes from
+// StFcsDb - getDetectorOffset() for a point on it, getNormal() for its
+// orientation - so the tilt is taken from the database rather than assumed.
+void StFcsClusterFeatureMaker::projectPhoton(McPhoton& ph) {
+   const StThreeVectorD v(ph.v[0], ph.v[1], ph.v[2]);
+   const StThreeVectorD dir(ph.p[0], ph.p[1], ph.p[2]);
+   int reaches = 0;
+   for (int det = 0; det < 2; det++) {
+      ph.projOk[det] = 0;
+      ph.proj[det][0] = -9999.0;
+      ph.proj[det][1] = -9999.0;
+      const StThreeVectorD p0 = mFcsDb->getDetectorOffset(det);
+      const StThreeVectorD nrm = mFcsDb->getNormal(det);
+      const double nd = nrm.dot(dir);
+      if (fabs(nd) < 1e-9) continue;  // parallel to the plane
+      const double t = nrm.dot(p0 - v) / nd;
+      if (t <= 0) continue;           // plane is behind the photon
+      const StThreeVectorD hit = v + dir * t;
+      ph.proj[det][0] = hit.x();
+      ph.proj[det][1] = hit.y();
+      ph.projOk[det] = 1;
+      reaches = 1;
+   }
+   if (reaches) bNMcPhotonEvent++;
+}
+
+//-----------------------------------------------------------------------------
+// Injection API, used by StFcsMuMcTruthMaker on the MuDst path. Call
+// clearMcPhotons() once per event, then addMcPhoton() per generated photon,
+// before this maker's Make() runs.
+void StFcsClusterFeatureMaker::clearMcPhotons() {
+   mMcPhotons.clear();
+   bNMcPhotonEvent = 0;
+   mMcExternal = 1;
+}
+
+void StFcsClusterFeatureMaker::addMcPhoton(int id, int parent, int parentPid, float e,
+                                           float px, float py, float pz,
+                                           float vx, float vy, float vz) {
+   if (!mFcsDb) return;
+   McPhoton ph;
+   ph.id = id;
+   ph.parent = parent;
+   ph.parentPid = parentPid;
+   ph.e = e;
+   ph.p[0] = px;
+   ph.p[1] = py;
+   ph.p[2] = pz;
+   ph.v[0] = vx;
+   ph.v[1] = vy;
+   ph.v[2] = vz;
+   projectPhoton(ph);
+   mMcPhotons.push_back(ph);
+   mMcExternal = 1;
+}
+
+//-----------------------------------------------------------------------------
 void StFcsClusterFeatureMaker::collectMcPhotons() {
+   if (mMcExternal) return;  // already supplied for this event, e.g. from MuDst
    mMcPhotons.clear();
    bNMcPhotonEvent = 0;
    if (!mSaveMcTruth) return;
@@ -185,13 +243,6 @@ void StFcsClusterFeatureMaker::collectMcPhotons() {
    const int ntrk = trkTable->GetNRows();
    const int nvtx = vtxTable->GetNRows();
    if (!trk || !vtx) return;
-
-   // detector planes, once
-   StThreeVectorD p0[2], nrm[2];
-   for (int det = 0; det < 2; det++) {
-      p0[det] = mFcsDb->getDetectorOffset(det);
-      nrm[det] = mFcsDb->getNormal(det);
-   }
 
    for (int i = 0; i < ntrk; i++) {
       if (trk[i].ge_pid != 1) continue;   // GEANT3 pid 1 = gamma
@@ -225,24 +276,7 @@ void StFcsClusterFeatureMaker::collectMcPhotons() {
          ph.v[k] = vtx[iv].ge_x[k];
       }
 
-      const StThreeVectorD v(ph.v[0], ph.v[1], ph.v[2]);
-      const StThreeVectorD dir(ph.p[0], ph.p[1], ph.p[2]);
-      int reaches = 0;
-      for (int det = 0; det < 2; det++) {
-         ph.projOk[det] = 0;
-         ph.proj[det][0] = -9999.0;
-         ph.proj[det][1] = -9999.0;
-         const double nd = nrm[det].dot(dir);
-         if (fabs(nd) < 1e-9) continue;               // parallel to the plane
-         const double t = nrm[det].dot(p0[det] - v) / nd;
-         if (t <= 0) continue;                        // plane is behind the photon
-         const StThreeVectorD hit = v + dir * t;
-         ph.proj[det][0] = hit.x();
-         ph.proj[det][1] = hit.y();
-         ph.projOk[det] = 1;
-         reaches = 1;
-      }
-      if (reaches) bNMcPhotonEvent++;
+      projectPhoton(ph);
       mMcPhotons.push_back(ph);
    }
 }
@@ -450,6 +484,11 @@ Int_t StFcsClusterFeatureMaker::Make() {
          mTree->Fill();
       }
    }
+
+   // Photons injected from outside are good for this event only. Clearing the
+   // flag means an event where the upstream maker found none falls back to the
+   // g2t tables rather than silently reusing the previous event's photons.
+   mMcExternal = 0;
    return kStOK;
 }
 

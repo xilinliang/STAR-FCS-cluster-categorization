@@ -6,16 +6,30 @@ you repeat.
 ```
   0. build                cons, inside the SL7 container
   1. training sample      runFzd_ml.C     .fzd   -> feat_*.root
+                          or runMudst_ml.C mode 0 on a MuDst with MC arrays
   2. check the truth      three draw commands on feat_*.root
   3. train                trainTMVA.C+    feat   -> weights/*.xml
   4. apply                runMudst_ml.C   (MuDst)  or  runPicoDst_ml.C (picoDst)
 ```
 
-The one rule that explains the shape of all of it: **train from the `.fzd`,
-apply on MuDst or picoDst.** The labels come from GEANT, and GEANT truth does
-not survive into a MuDst or a picoDst — `StMuFcsHit` and `StPicoFcsHit` store
-detector id, id, adc and energy, and nothing about which track deposited the
-energy. A feature file made from a MuDst has features and no labels.
+There are **two kinds of truth**, and they survive differently. That single fact
+explains the shape of everything else:
+
+- **Hit level** — which GEANT track deposited energy in which tower. Exists only
+  in a GEANT chain: `StFcsHit::getGeantTracks()`, filled by
+  `StFcsFastSimulatorMaker`. `StMuFcsHit` and `StPicoFcsHit` store detector id,
+  id, adc and energy and nothing more, so this is **lost** in a MuDst or
+  picoDst. It gives `trkPid`, `trkE`, `truthNPhoton`.
+- **Generator level** — the particles that were generated, their momenta and
+  vertices. This **does** survive: `StMuMcTrack` is constructed directly from
+  `g2t_track_st` and keeps `GePid()`, `IdVx()`, `E()`, `Pxyz()`, with
+  `StMuMcVertex::XyzV()`. It gives `mcLabel`, `mcSep`, `mcZgg` — and `mcLabel`
+  is the label you should train on.
+
+So you can build a labelled training sample from a `.fzd` **or** from a MuDst
+that was produced with the MC arrays. The `.fzd` additionally gives the
+hit-level branches; the MuDst is usually already sitting on disk from your
+normal BFC pass.
 
 ### How truth level and detector level correspond
 
@@ -58,26 +72,35 @@ That pairing is what makes it trainable. Two independent mechanisms create it:
   `setMcMatchRadius` (11 cm). This is geometric matching, and it is independent
   of how GEANT shared the deposits out. This gives `mcLabel`, `mcSep`, `mcZgg`.
 
-Step 4 is a **different dataset and a different purpose**: an already
-reconstructed MuDst or picoDst, where no truth exists or is wanted, and the
-trained model supplies the category that truth supplied during training.
+Step 4 is a **different purpose**: an already reconstructed MuDst or picoDst —
+in general real data, where no truth exists — and the trained model supplies the
+category that truth supplied during training.
 
 ```
    step 1   .fzd    -> [ truth + reconstruction ] -> feat.root -> model
    step 4   MuDst   -> [ reconstruction only    ] -> features  -> model -> category
 ```
 
-Note what this rules out: you cannot reconstruct the `.fzd` into a MuDst first
-and dump features from that MuDst afterwards. The truth is dropped in the
-conversion, so the pairing above has to happen in the same job that does the
-reconstruction — which is why `runFzd_ml.C` puts the dumper in the chain rather
-than running it later.
+The MuDst path works the same way, one level thinner. `StFcsMuMcTruthMaker`
+reads the generated photons from `StMuMcTrack` and hands them to the dumper,
+which projects and matches them exactly as above — so a MuDst produced from the
+same `.fzd`, in your normal BFC pass, also yields `mcLabel`. What it cannot
+give you is the hit-level set, since the hit-to-track links are gone.
 
-| input | carries | use it for |
-|---|---|---|
-| `.fzd` | GEANT record: g2t tables, hits, generated particles | **training samples** |
-| MuDst | reconstructed clusters + towers, no truth | applying, full feature sets |
-| picoDst | cluster summary only, no tower list, no truth | applying, feature set 6 only |
+One ordering trap on that path: `StChain` runs makers in the order they were
+constructed, so `StFcsMuMcTruthMaker` must be built **before**
+`StFcsClusterFeatureMaker` or the photons arrive an event late. It resolves the
+dumper by name in `Init()` so it can be constructed first, and warns in `Init()`
+if it finds itself running second.
+
+| input | truth it carries | features possible | use it for |
+|---|---|---|---|
+| `.fzd` | hit level **and** generator level | all sets | training, and any hit-level truth study |
+| MuDst | generator level only (`StMuMcTrack`) | all sets | **training** or applying |
+| picoDst | generator level in the file, not yet read by this code | set 6 only | applying |
+
+A MuDst produced without the MC arrays has no truth at all;
+`StFcsMuMcTruthMaker` says so once in `Finish()` and `mcLabel` stays at −1.
 
 ---
 
@@ -108,6 +131,7 @@ StRoot/StFcsClusterFeatureMaker/    dumps the training tree (needs GEANT truth)
 StRoot/StFcsMLCategoryMaker/        applies the model in a MuDst/StEvent chain
   └ StFcsClusterFeatures.h          THE definition of the input variables
 StRoot/StFcsPicoCategoryMaker/      applies the model to picoDst input
+StRoot/StFcsMuMcTruthMaker/         generator-level truth on the MuDst path
 ```
 
 `StFcsPicoCategoryMaker` includes `StFcsMLCategoryMaker/StFcsClusterFeatures.h`
@@ -126,7 +150,22 @@ any edit to `StFcsClusterFeatures.h`.
 
 ---
 
-## 1. Training sample, from the `.fzd`
+## 1. Training sample
+
+Either input works. **From a simulated MuDst** you already have — no geometry
+tag to get right, and it reuses your normal BFC output:
+
+```csh
+root4star -b -q 'runMudst_ml.C("pi0.e30.vz0.all.MuDst.root",-1,-2,".",1,0,0,"","feat_pi0.root")'
+```
+
+That is mode 0, and it now also runs `StFcsMuMcTruthMaker`, so `mcLabel` is
+filled from `StMuMcTrack`. Check `MuDst->GetListOfBranches()` for
+`StMuMcTrack`/`StMuMcVertex` first — a production without the MC arrays gives no
+labels, and the maker will say so in `Finish()`.
+
+**From the `.fzd`** if you also want the hit-level branches, or if the MuDst was
+made without the MC arrays:
 
 ```csh
 root4star -b -q 'runFzd_ml.C("pi0.e30.vz0.run1.fzd",-1,"feat_pi0.root","<geom>","<sdt>")'
