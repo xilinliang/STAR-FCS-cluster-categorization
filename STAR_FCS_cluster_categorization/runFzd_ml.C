@@ -51,7 +51,14 @@ void runFzd_ml(const char* fzd = "pi0.e30.vz0.run1.fzd",
    // fcsSim: StFcsFastSimulatorMaker - this is what fills the GEANT track links
    // NOTE fcsDat and fcsWFF are deliberately absent: those read real DAQ
    // waveforms. In simulation the fast simulator produces the hits directly.
-   TString opts = Form("fzin,%s,%s,fcsSim,fcsCluster,fcsPoint,fcsDb,StEvent", geometry, dbTime);
+   // MakeEvent, NOT StEvent. In BigFullChain.h the option "StEvent" only loads
+   // the library - its maker field is empty - while "MakeEvent" is the one that
+   // instantiates StEventMaker and so creates the StEvent object. Without it
+   // the chain runs, the makers are all there, and every one of them that calls
+   // GetDataSet("StEvent") quietly does nothing: the fast simulator adds no
+   // hits, no clusters are made, and the feature tree ends up with zero
+   // entries. MakeEvent pulls StEvent in as a dependency anyway.
+   TString opts = Form("fzin,%s,%s,MakeEvent,fcsSim,fcsCluster,fcsPoint,fcsDb", geometry, dbTime);
    printf("chain options: %s\n", opts.Data());
 
    gROOT->LoadMacro("bfc.C");
@@ -62,6 +69,20 @@ void runFzd_ml(const char* fzd = "pi0.e30.vz0.run1.fzd",
 
    if (!chain) {
       printf("bfc did not create a chain - check the option string\n");
+      return;
+   }
+
+   // Fail loudly on the two chain mistakes that otherwise produce a perfectly
+   // healthy-looking run with an empty output tree.
+   if (!chain->GetMaker("StEventMaker") && !chain->GetMaker("0Event")) {
+      printf("\nNo StEventMaker in the chain. Everything downstream reads StEvent,\n");
+      printf("so the run would finish cleanly and write an EMPTY tree.\n");
+      printf("Add MakeEvent to the chain options.\n\n");
+      return;
+   }
+   if (!chain->GetMaker("StFcsFastSimulatorMaker")) {
+      printf("\nNo StFcsFastSimulatorMaker in the chain (option fcsSim). Without it\n");
+      printf("there are no FCS hits and therefore no clusters and no truth links.\n\n");
       return;
    }
 
@@ -78,6 +99,12 @@ void runFzd_ml(const char* fzd = "pi0.e30.vz0.run1.fzd",
       printf("StFcsClusterFeatureMaker::Init failed\n");
       return;
    }
+
+   // Confirm the dumper really joined the chain. A maker attaches itself to
+   // whatever StMaker::fgStChain points at when it is constructed; if that were
+   // not the chain, Make() would never be called and the tree would be empty.
+   if (!chain->GetMaker("FcsClusFeat"))
+      printf("WARNING: StFcsClusterFeatureMaker is not in the chain's make list\n");
 
    int last = (nevt > 0) ? nevt : 1000000;
    chain->EventLoop(1, last);
