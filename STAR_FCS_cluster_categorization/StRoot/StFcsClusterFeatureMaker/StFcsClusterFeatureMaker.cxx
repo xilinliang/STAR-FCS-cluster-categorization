@@ -172,6 +172,14 @@ void StFcsClusterFeatureMaker::resetBranches() {
 // Project one photon onto both ECal halves. The plane of each half comes from
 // StFcsDb - getDetectorOffset() for a point on it, getNormal() for its
 // orientation - so the tilt is taken from the database rather than assumed.
+//
+// The plane is taken at SHOWER MAX, not at the front face. StFcsDb puts the
+// cluster centroid there too (getStarXYZfromColumnRow defaults FcsZ to
+// getShowerMaxZ), so a projected photon and a cluster position are then
+// measured on the same plane. Projecting to the front face instead shifts a
+// photon inward by about depth * r / z - a centimetre or two at FCS radii - and
+// shrinks mcSep by the same small factor. StFcsPicoFeatureMaker does the same,
+// so the two feature files stay comparable.
 void StFcsClusterFeatureMaker::projectPhoton(McPhoton& ph) {
    const StThreeVectorD v(ph.v[0], ph.v[1], ph.v[2]);
    const StThreeVectorD dir(ph.p[0], ph.p[1], ph.p[2]);
@@ -180,7 +188,7 @@ void StFcsClusterFeatureMaker::projectPhoton(McPhoton& ph) {
       ph.projOk[det] = 0;
       ph.proj[det][0] = -9999.0;
       ph.proj[det][1] = -9999.0;
-      const StThreeVectorD p0 = mFcsDb->getDetectorOffset(det);
+      const StThreeVectorD p0 = mFcsDb->getDetectorOffset(det, mFcsDb->getShowerMaxZ(det));
       const StThreeVectorD nrm = mFcsDb->getNormal(det);
       const double nd = nrm.dot(dir);
       if (fabs(nd) < 1e-9) continue;  // parallel to the plane

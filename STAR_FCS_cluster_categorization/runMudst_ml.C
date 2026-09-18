@@ -6,15 +6,24 @@
 //   mode = 1 : apply the model - ML category maker between cluster and point makers
 //   mode = 2 : both (ML categories applied, features dumped afterwards for QA)
 //
+// The last argument, isSim, matters. A simulated MuDst has run number 1, so the
+// FCS gain tables are not in the database for it and the waveform fitter would
+// produce zero energy for every tower - an empty feature tree from a job that
+// otherwise looks fine. With isSim=1 the energy is taken straight from the
+// deposited dE and the gain-correction text file is not read.
+//
 // Example:
-//   root4star -b -q 'runMudst_ml.C("st_physics_...MuDst.root",-1,5000,".",1,0,0,"","feat.root")'
-//   root4star -b -q 'runMudst_ml.C("st_physics_...MuDst.root",-1,5000,".",1,0,1,"weights/FcsCat13_BDTG.weights.xml")'
+//   simulation:
+//   root4star -b -q 'runMudst_ml.C("pi0.e30.vz0.all.MuDst.root",-1,-2,".",1,0,0,"","feat_pi0.root",1)'
+//   data:
+//   root4star -b -q 'runMudst_ml.C("st_physics_...MuDst.root",-1,5000,".",1,0,1,"weights/FcsCat13_BDTG.weights.xml","",0)'
 
 void runMudst_ml(const char* file = "st_cosmic_adc_22326042_raw_0000005.MuDst.root",
                  int ifile = -1, Int_t nevt = 10, const char* outdir = ".", int readMuDst = 1,
                  int debug = 0, int mode = 0,
                  const char* modelFile = "weights/FcsCat13_BDTG.weights.xml",
-                 const char* featFile = "fcsEcalClusterFeatures.root") {
+                 const char* featFile = "fcsEcalClusterFeatures.root",
+                 int isSim = 1) {
    gROOT->Macro("Load.C");
    gROOT->Macro("$STAR/StRoot/StMuDSTMaker/COMMON/macros/loadSharedLibraries.C");
    gSystem->Load("StEventMaker");
@@ -52,13 +61,29 @@ void runMudst_ml(const char* file = "st_cosmic_adc_22326042_raw_0000005.MuDst.ro
 
    StFcsDbMaker* fcsDbMkr = new StFcsDbMaker();
    StFcsDb* fcsDb = (StFcsDb*)chain->GetDataSet("fcsDb");
-   fcsDb->setReadGainCorrFromText();
+
+   // GAINS. A simulated MuDst carries run number 1, so every FCS calibration
+   // query comes back empty:
+   //   StFcsDb::InitRun - run = 1
+   //   StError: StFcsDbMaker::InitRun - No Calibration/fcs/fcsEcalGain   (etc)
+   // With no gains the waveform fitter turns ADC into zero energy, no clusters
+   // are built, and the feature tree ends up empty while the job looks healthy.
+   //
+   // setReadGainCorrFromText() is for the data gain-calibration iteration - it
+   // wants fcsgaincorr.txt in the working directory - so it is only switched on
+   // for data here.
+   if (!isSim) fcsDb->setReadGainCorrFromText();
 
    StEventMaker* eventMk = new StEventMaker();
    StFcsRawHitMaker* hit = new StFcsRawHitMaker();
    hit->setReadMuDst(readMuDst);
    StFcsWaveformFitMaker* wff = new StFcsWaveformFitMaker();
    wff->SetDebug(debug);
+   // On simulation take the energy straight from the deposited dE instead of
+   // fitting a waveform and multiplying by a gain that does not exist.
+   // StFcsWaveformFitMaker.h documents mEnergySelect as "0=MC (straight from
+   // dE), >0 see analyzeWaveform()".
+   if (isSim) wff->setEnergySelect(0, 0, 0);
 
    StFcsClusterMaker* clu = new StFcsClusterMaker();
    clu->SetDebug(debug);
