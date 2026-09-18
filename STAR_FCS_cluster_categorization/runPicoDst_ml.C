@@ -66,6 +66,18 @@ void runPicoDst_ml(const char* input = "pi0.e30.vz0.all.picoDst.root",
    gSystem->Load("StPicoDstMaker");
    gSystem->Load("StFcsDbMaker");
 
+   // EVERY library this macro names a class from is loaded HERE, before the
+   // chain is built, whether or not the mode will use it. CINT parses the whole
+   // function body before it executes a single line, so a class whose library is
+   // loaded further down - even inside an if() that will not run - is unknown at
+   // parse time and you get
+   //   Error: Symbol StFcsPicoFeatureMaker is not defined in current scope
+   //   Error: Invalid type 'StFcsPicoFeatureMaker*' in declaration of 'feat'
+   // which reads like a build failure but is only a load-order problem.
+   gSystem->Load("libTMVA");  // must precede StFcsPicoCategoryMaker
+   gSystem->Load("StFcsPicoFeatureMaker");
+   gSystem->Load("StFcsPicoCategoryMaker");
+
    StChain* chain = new StChain("StChain");
 
    StPicoDstMaker* picoMaker = new StPicoDstMaker(StPicoDstMaker::IoRead, input, "picoDst");
@@ -84,10 +96,8 @@ void runPicoDst_ml(const char* input = "pi0.e30.vz0.all.picoDst.root",
    fcsDbMkr->setDbAccess(0);
 
    // ---- mode 0 / 2 : dump features ----
-   StFcsPicoFeatureMaker* feat = 0;
    if (mode == 0 || mode == 2) {
-      gSystem->Load("StFcsPicoFeatureMaker");
-      feat = new StFcsPicoFeatureMaker(picoMaker);
+      StFcsPicoFeatureMaker* feat = new StFcsPicoFeatureMaker(picoMaker);
       feat->setOutputFile(outFile);
       feat->setEnergyThreshold(clusterEmin);
       feat->setSaveMcTruth(1);      // generator-level photons -> mcLabel, mcSep
@@ -96,8 +106,6 @@ void runPicoDst_ml(const char* input = "pi0.e30.vz0.all.picoDst.root",
 
    // ---- mode 1 / 2 : apply a trained model ----
    if (mode == 1 || mode == 2) {
-      gSystem->Load("libTMVA");  // must precede our library
-      gSystem->Load("StFcsPicoCategoryMaker");
       StFcsPicoCategoryMaker* cat = new StFcsPicoCategoryMaker(picoMaker);
       cat->setFeatureSet(featureSet);  // must match the weight file
       cat->setNoModel(0);
