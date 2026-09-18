@@ -16,13 +16,17 @@
 #include "TTree.h"
 #include "TVector3.h"
 
+#include "StFcsDbMaker/StFcsDb.h"
 #include "StPicoDstMaker/StPicoDstMaker.h"
 #include "StPicoEvent/StPicoDst.h"
 #include "StPicoEvent/StPicoEvent.h"
 #include "StPicoEvent/StPicoFcsCluster.h"
+#include "StPicoEvent/StPicoFcsHit.h"
 
 // the feature definitions, shared with StFcsMLCategoryMaker and trainTMVA.C
 #include "StFcsMLCategoryMaker/StFcsClusterFeatures.h"
+// recovers which towers belong to which cluster - needed by sets 3, 13 and 34
+#include "StFcsMLCategoryMaker/StFcsTowerAssoc.h"
 
 using namespace StFcsClusterFeatures;
 
@@ -43,6 +47,7 @@ ClassImp(StFcsPicoCategoryMaker)
     : StMaker(name),
       mPicoDstMaker(picoMaker),
       mPicoDst(0),
+      mFcsDb(0),
       mFeatureSet(6),
       mWeightFile("weights/FcsCat6_BDTG.weights.xml"),
       mTMVAMethod("BDTG"),
@@ -53,6 +58,8 @@ ClassImp(StFcsPicoCategoryMaker)
       mEmin(0.5),
       mPairEmin(1.0),
       mZggMax(0.7),
+      mMaxDist(5.0),
+      mUseNTow(1),
       mFile(0),
       mTree(0),
       mNEvents(0),
@@ -84,11 +91,25 @@ Int_t StFcsPicoCategoryMaker::Init() {
    const int nv = nVar(mFeatureSet);
    const char** names = varNames(mFeatureSet);
    LOG_INFO << "StFcsPicoCategoryMaker: feature set " << mFeatureSet << " (" << nv << " variables)" << endm;
+
+   // Sets 3, 13 and 34 need the cluster's tower list, which picoDst does not
+   // store. StFcsTowerAssoc recovers it geometrically, and that needs the tower
+   // map and cell size from StFcsDb - geometry only, no database: run the
+   // StFcsDbMaker with setDbAccess(0).
    if (mFeatureSet != 6) {
-      LOG_WARN << "StFcsPicoCategoryMaker: feature set " << mFeatureSet
-               << " needs the cluster's tower list, which StPicoDst does not store. "
-               << "Only set 6 is computable from picoDst input." << endm;
-      return kStFatal;
+      mFcsDb = static_cast<StFcsDb*>(GetDataSet("fcsDb"));
+      if (!mFcsDb) {
+         LOG_ERROR << "StFcsPicoCategoryMaker::Init feature set " << mFeatureSet
+                   << " needs the tower list, which is recovered with StFcsDb geometry, but there "
+                      "is no StFcsDbMaker in the chain. Add one (setDbAccess(0) is enough), or use "
+                      "feature set 6, which needs no tower list."
+                   << endm;
+         return kStFatal;
+      }
+      LOG_INFO << Form("StFcsPicoCategoryMaker: recovering the tower list, maxDist=%.1f cells, "
+                       "truncate to stored nTowers=%d",
+                       mMaxDist, mUseNTow)
+               << endm;
    }
 
    if (!mNoModel) {
@@ -119,6 +140,7 @@ Int_t StFcsPicoCategoryMaker::Init() {
    mTree->Branch("eta", &bEta, "eta/F");
    mTree->Branch("phi", &bPhi, "phi/F");
    mTree->Branch("nTowers", &bNTowers, "nTowers/I");
+   mTree->Branch("nTowRec", &bNTowRec, "nTowRec/I");  // towers the association gave it
    mTree->Branch("sigmaMin", &bSigmaMin, "sigmaMin/F");
    mTree->Branch("sigmaMax", &bSigmaMax, "sigmaMax/F");
    mTree->Branch("theta", &bTheta, "theta/F");
@@ -150,9 +172,13 @@ void StFcsPicoCategoryMaker::bookHistograms() {
 //-----------------------------------------------------------------------------
 // Build the feature vector for one picoDst cluster and, if a model is loaded,
 // evaluate it. feat[] must hold nVar(mFeatureSet) floats, prob[] three.
-int StFcsPicoCategoryMaker::evaluate(StPicoFcsCluster* clu, float* feat, float* prob) {
+int StFcsPicoCategoryMaker::evaluate(StPicoFcsCluster* clu, int nTow, const float* towE,
+                                     const int* towRow, const int* towCol, float* feat,
+                                     float* prob) {
    const int nv = nVar(mFeatureSet);
    for (int k = 0; k < 3; k++) prob[k] = 0.0;
+
+   const int det = clu->detectorId();
 
    ClusterInput c;
    c.e = clu->energy();
@@ -162,13 +188,15 @@ int StFcsPicoCategoryMaker::evaluate(StPicoFcsCluster* clu, float* feat, float* 
    c.sigmaMax = clu->sigmaMax();
    c.theta = clu->theta();
    c.nTowers = clu->nTowers();
-   c.nNeighbor = 0;  // not stored in picoDst; unused by set 6
-   c.xw = 0;
-   c.yw = 0;
-   c.nTow = 0;  // no tower list in picoDst - set 6 does not need one
-   c.towerE = 0;
-   c.towerRow = 0;
-   c.towerCol = 0;
+   c.nNeighbor = 0;  // not stored in picoDst; unused by sets 3, 6 and 13
+   c.xw = mFcsDb ? mFcsDb->getXWidth(det) : 0;
+   c.yw = mFcsDb ? mFcsDb->getYWidth(det) : 0;
+   // Empty for set 6, which needs no tower list; recovered by StFcsTowerAssoc
+   // for sets 3, 13 and 34.
+   c.nTow = nTow;
+   c.towerE = towE;
+   c.towerRow = towRow;
+   c.towerCol = towCol;
 
    if (compute(mFeatureSet, c, feat) != nv) return -1;
    if (mNoModel) return -1;
@@ -219,46 +247,107 @@ Int_t StFcsPicoCategoryMaker::Make() {
    // evaluate every ECal cluster once; the pi0 pairing reads the result back
    mCatML.assign(nclu, -1);
 
-   for (unsigned int i = 0; i < nclu; i++) {
-      StPicoFcsCluster* clu = mPicoDst->fcsCluster(i);
-      if (!clu) continue;
-      if (clu->detectorId() > 1) continue;  // ECal north(0) / south(1) only
-
-      float f[kNVarMax];
-      float p[3];
-      const int catML = evaluate(clu, f, p);
-      mCatML[i] = catML;
-
-      if (clu->energy() < mEmin) continue;  // tree and QA threshold
-
-      bDet = clu->detectorId();
-      bClId = clu->id();
-      bE = clu->energy();
-      bX = clu->x();
-      bY = clu->y();
-      bNTowers = clu->nTowers();
-      bSigmaMin = clu->sigmaMin();
-      bSigmaMax = clu->sigmaMax();
-      bTheta = clu->theta();
-      bChi2Ndf1 = clu->chi2Ndf1Photon();
-      bChi2Ndf2 = clu->chi2Ndf2Photon();
-      bCatStar = clu->category();
-      const TLorentzVector p4 = clu->fourMomentum();
-      bPt = p4.Pt();
-      bEta = p4.Eta();
-      bPhi = p4.Phi();
-      for (int k = 0; k < nv; k++) bFeat[k] = f[k];
-      for (int k = 0; k < 3; k++) bProb[k] = p[k];
-      bCatML = catML;
-
-      if (catML >= 0) {
-         for (int k = 0; k < 3; k++) h1_prob[k]->Fill(p[k]);
-         h2_catStar_vs_catML->Fill(bCatStar, bCatML);
-         if (bCatML != bCatStar) mNChanged++;
+   // One detector half at a time, because the tower association is per half.
+   for (int det = 0; det < 2; det++) {
+      // ---- towers of this half, only if the feature set needs them ----
+      std::vector<StFcsTowerAssoc::Tower> tow;
+      if (mFcsDb) {
+         const int nCol = mFcsDb->nColumn(det);
+         const int nRow = mFcsDb->nRow(det);
+         const unsigned int nhit = mPicoDst->numberOfFcsHits();
+         for (unsigned int i = 0; i < nhit; i++) {
+            StPicoFcsHit* h = mPicoDst->fcsHit(i);
+            if (!h || (int)h->detectorId() != det) continue;
+            const int row = mFcsDb->getRowNumber(det, h->id());
+            const int col = mFcsDb->getColumnNumber(det, h->id());
+            if (row < 1 || row > nRow || col < 1 || col > nCol) continue;
+            StFcsTowerAssoc::Tower t;
+            t.id = h->id();
+            t.row = row;
+            t.col = col;
+            t.e = h->energy();
+            tow.push_back(t);
+         }
       }
 
-      mNCluster++;
-      mTree->Fill();
+      // ---- clusters of this half ----
+      std::vector<int> cluIdx;
+      std::vector<float> cx, cy;
+      std::vector<int> cn;
+      for (unsigned int i = 0; i < nclu; i++) {
+         StPicoFcsCluster* c = mPicoDst->fcsCluster(i);
+         if (!c || (int)c->detectorId() != det) continue;
+         cluIdx.push_back((int)i);
+         cx.push_back(c->x());
+         cy.push_back(c->y());
+         cn.push_back(mUseNTow ? c->nTowers() : 0);
+      }
+      const int nc = (int)cluIdx.size();
+      if (nc == 0) continue;
+
+      std::vector<int> owner;
+      if (!tow.empty())
+         StFcsTowerAssoc::assign(tow, nc, &cx[0], &cy[0], &cn[0], mMaxDist, owner);
+
+      std::vector<StFcsTowerAssoc::Tower> mine;
+      std::vector<float> te;
+      std::vector<int> trow, tcol;
+
+      for (int ic = 0; ic < nc; ic++) {
+         const int i = cluIdx[ic];
+         StPicoFcsCluster* clu = mPicoDst->fcsCluster(i);
+         if (!clu) continue;
+
+         mine.clear();
+         if (!owner.empty()) StFcsTowerAssoc::gather(tow, owner, ic, mine);
+         te.clear();
+         trow.clear();
+         tcol.clear();
+         for (size_t k = 0; k < mine.size(); k++) {
+            te.push_back(mine[k].e);
+            trow.push_back(mine[k].row);
+            tcol.push_back(mine[k].col);
+         }
+         const int nTow = (int)te.size();
+
+         float f[kNVarMax];
+         float p[3];
+         const int catML = evaluate(clu, nTow, nTow ? &te[0] : 0, nTow ? &trow[0] : 0,
+                                    nTow ? &tcol[0] : 0, f, p);
+         mCatML[i] = catML;
+
+         if (clu->energy() < mEmin) continue;  // tree and QA threshold
+
+         bDet = det;
+         bClId = clu->id();
+         bE = clu->energy();
+         bX = clu->x();
+         bY = clu->y();
+         bNTowers = clu->nTowers();
+         bNTowRec = nTow;
+         bSigmaMin = clu->sigmaMin();
+         bSigmaMax = clu->sigmaMax();
+         bTheta = clu->theta();
+         bChi2Ndf1 = clu->chi2Ndf1Photon();
+         bChi2Ndf2 = clu->chi2Ndf2Photon();
+         bCatStar = clu->category();
+         const TLorentzVector p4 = clu->fourMomentum();
+         bPt = p4.Pt();
+         bEta = p4.Eta();
+         bPhi = p4.Phi();
+         for (int k = 0; k < nv; k++) bFeat[k] = f[k];
+         for (int k = 0; k < 3; k++) bProb[k] = p[k];
+         bCatML = catML;
+
+         if (catML >= 0) {
+            for (int k = 0; k < 3; k++) h1_prob[k]->Fill(p[k]);
+            h2_catStar_vs_catML->Fill(bCatStar, bCatML);
+            if (bCatML != bCatStar) mNChanged++;
+         }
+
+         mNCluster++;
+         mTree->Fill();
+      }
    }
 
    // pi0 QA: pair ECal clusters, once selected on the STAR category and once on

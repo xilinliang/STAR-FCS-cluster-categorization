@@ -18,8 +18,9 @@
 // Nothing to install: TMVA ships inside ROOT, which ships inside the STAR
 // library stack.
 //
-// Input : the tree written by StFcsClusterFeatureMaker (run on simulation, so
-//         the truth branches are filled)
+// Input : the `clusters` tree written by StFcsClusterFeatureMaker (.fzd or
+//         MuDst) or StFcsPicoFeatureMaker (picoDst) - one schema, either way,
+//         run on simulation so the truth branches are filled
 // Output: weights/<jobname><set>_BDTG.weights.xml , ..._MLP.weights.xml
 //         and <jobname><set>.root for the TMVA GUI
 //
@@ -31,13 +32,16 @@
 // starting point: raw tower energies plus E, sigmaMax, sigmaMin and E1/E, with
 // none of the correlated derived triplets of set 13.
 //
-// Use 6 when the model will be applied to picoDst
-// input: StPicoFcsCluster stores no tower list, so those six variables are the
-// only ones that exist on both sides. The training sample comes from a MuDst
-// chain either way, because that is where the GEANT truth links live - see
-// StFcsClusterFeatureMaker. Set 6 costs you the tower-level shape detail, so
-// expect it to separate 1-photon from 2-photon clusters less sharply than 13;
-// train both on the same sample and compare before deciding it is good enough.
+// Set 6 is the tower-free one: it is computable from any input without
+// reconstructing anything, which used to be the only way to work on picoDst.
+// StPicoFcsCluster still stores no tower list, but StFcsTowerAssoc.h now
+// recovers it geometrically (92 % exact tower count, median energy difference
+// zero - see BUILD.md), so sets 3, 13 and 34 work on picoDst too. Set 6 costs
+// you the tower-level shape detail, so expect it to separate 1-photon from
+// 2-photon clusters less sharply; train both on the same sample and compare.
+//
+// The input file can come from a .fzd, a MuDst or a picoDst - all three write
+// this same tree, and all three carry the generator-level label mcLabel.
 //
 // author: generated for Xilin Liang
 
@@ -206,12 +210,16 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
          printf("  The tree is empty. The feature dumper ran but wrote no clusters -\n"
                 "  check the ECal cluster count in the job that produced it.\n");
       } else if (nNoTruth == n - nBelowE) {
-         printf("  Every cluster has no truth. That is what a feature file made from a\n"
-                "  MuDst or a picoDst looks like: StMuFcsHit and StPicoFcsHit carry no\n"
-                "  GEANT track links, and the g2t tables are not in those chains either.\n"
-                "  Produce the training file from the GEANT .fzd instead:\n\n"
-                "    root4star -b -q 'runFzd_ml.C(\"pi0...fzd\",-1,\"feat.root\",\"<geom>\",\"<sdt>\")'\n\n"
-                "  MuDst and picoDst are for applying a trained model, not for training.\n");
+         printf("  Every cluster has no truth, so the input carried no MC arrays.\n"
+                "  All three inputs CAN be labelled - the generator-level truth survives\n"
+                "  into every tier - so check, in order:\n"
+                "    .fzd     : is fcsSim in the chain? no fast simulator, no hits\n"
+                "    MuDst    : does it have StMuMcTrack/StMuMcVertex branches, and was\n"
+                "               StFcsMuMcTruthMaker constructed BEFORE the dumper?\n"
+                "    picoDst  : SetStatus(\"McTrack*\",1) and (\"McVertex*\",1), and was the\n"
+                "               picoDst produced from a MuDst that had the MC arrays?\n"
+                "  Only the HIT-level branches (trkPid, truthNPhoton) are exclusive to the\n"
+                "  .fzd; mcLabel, which is what this macro trains on, is not.\n");
       } else if (nBelowE == n) {
          printf("  Every cluster is below eMin = %.2f GeV. Lower it, or check the energy\n"
                 "  scale in the dumper.\n", eMin);

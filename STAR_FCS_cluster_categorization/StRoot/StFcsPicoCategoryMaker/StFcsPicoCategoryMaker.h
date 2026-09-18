@@ -15,12 +15,18 @@
 // StMuFcsCluster::hits(). FcsHits is written as an independent flat collection
 // with no back-pointer to a cluster.
 //
-// That is why this maker uses FEATURE SET 6 - the subset that is genuinely
-// present (logE, nTowers, sigmaMax, sigmaMin, sigmaRatio, theta). The other
-// seven variables of set 13 are all tower-level and cannot be recovered from a
-// picoDst without re-associating hits by hand, which would be a guess at the
-// clustering rather than a reading of it. Train on MuDst with set 6 and the
-// model applies here unchanged.
+// FEATURE SETS. Set 6 (logE, nTowers, sigmaMax, sigmaMin, sigmaRatio, theta) is
+// the subset that needs no tower list at all, so it always works and is the
+// safe default. The tower-level sets - 3, 13 and 34 - are available too, by
+// re-associating the FcsHits to the clusters geometrically: see
+// StFcsTowerAssoc.h, which documents the method and how closely it reproduces
+// the stored cluster (92 % exact tower count, median energy difference zero).
+// That is a reconstruction of the clustering rather than a reading of it, so it
+// is opt-in: ask for set 3/13/34 and you get it, with the association running;
+// ask for nothing and you get set 6.
+//
+// Whichever you use, train and apply on the SAME feature set - the weight file
+// records the variable names and TMVA will refuse a mismatch.
 //
 // Two further things picoDst does not give you, both worth knowing before you
 // read the output:
@@ -53,6 +59,7 @@ class TH2F;
 class StPicoDstMaker;
 class StPicoDst;
 class StPicoFcsCluster;
+class StFcsDb;
 
 #ifndef __CINT__
 namespace TMVA {
@@ -87,15 +94,24 @@ class StFcsPicoCategoryMaker : public StMaker {
    // first, to see the distributions before there is anything to evaluate.
    void setNoModel(int v) { mNoModel = v; }
 
+   // Tower-association tuning, used only for feature sets 3 / 13 / 34.
+   // See StFcsTowerAssoc.h; the defaults are the measured plateau.
+   void setMaxTowerDistance(float cells) { mMaxDist = cells; }
+   void setUseStoredNTowers(int v) { mUseNTow = v; }
+
   private:
    void bookHistograms();
    void fillPi0(int useMlCategory);
    // Evaluates one cluster: fills feat[] and, unless mNoModel, prob[] too.
    // Returns the ML category, or -1 when there is no model or no response.
-   int evaluate(StPicoFcsCluster* clu, float* feat, float* prob);
+   // towE/towRow/towCol carry the recovered tower list (nTow entries, row and
+   // column 1-based); pass nTow = 0 for set 6, which does not need one.
+   int evaluate(StPicoFcsCluster* clu, int nTow, const float* towE, const int* towRow,
+                const int* towCol, float* feat, float* prob);
 
    StPicoDstMaker* mPicoDstMaker;
    StPicoDst* mPicoDst;
+   StFcsDb* mFcsDb;
 
    int mFeatureSet;
    std::string mWeightFile;
@@ -107,6 +123,8 @@ class StFcsPicoCategoryMaker : public StMaker {
    float mEmin;
    float mPairEmin;
    float mZggMax;
+   float mMaxDist;
+   int mUseNTow;
 
    Float_t mVar[kNVarMax];
 
@@ -114,7 +132,7 @@ class StFcsPicoCategoryMaker : public StMaker {
    TTree* mTree;
 
    // one entry per ECal cluster
-   Int_t bRun, bEvent, bDet, bClId, bNCluDet, bNTowers, bCatStar, bCatML;
+   Int_t bRun, bEvent, bDet, bClId, bNCluDet, bNTowers, bNTowRec, bCatStar, bCatML;
    Float_t bE, bX, bY, bStarX, bStarY, bStarZ, bPt, bEta, bPhi;
    Float_t bSigmaMin, bSigmaMax, bTheta, bChi2Ndf1, bChi2Ndf2, bVz;
    Float_t bFeat[kNVarMax];

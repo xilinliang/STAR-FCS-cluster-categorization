@@ -68,16 +68,20 @@ Two gotchas that cost people a day each:
 ## 3. What is in this package
 
 ```
-StRoot/StFcsClusterFeatureMaker/   dump one tree entry per ECal cluster (MuDst)
+StRoot/StFcsClusterFeatureMaker/   dump one tree entry per ECal cluster (.fzd/MuDst)
 StRoot/StFcsMLCategoryMaker/       apply the trained model, set category() (MuDst)
   ├ StFcsClusterFeatures.h         THE definition of the input variables
+  ├ StFcsTowerAssoc.h              recovers cluster <-> tower on picoDst
   └ StFcsMLP.h                     dense-net evaluator (non-TMVA backend only)
+StRoot/StFcsMuMcTruthMaker/        generator-level truth on the MuDst path
+StRoot/StFcsPicoFeatureMaker/      dump the SAME tree from StPicoDst input
 StRoot/StFcsPicoCategoryMaker/     apply the model to StPicoDst input
 trainTMVA.C                        TMVA multiclass training on the dumped tree
 testFeatures.C                     smoke test for the feature definitions
+testAssoc.C                        smoke test for the picoDst tower association
 runFzd_ml.C                        TRAINING sample, from the GEANT .fzd
 runMudst_ml.C                      your runMudst.C with both makers wired in
-runPicoDst_ml.C                    the same, for picoDst input
+runPicoDst_ml.C                    the same, for picoDst input (dump and/or apply)
 BUILD.md                           SL7 container, cons, and job submission
 optional_python/                   numpy reader + PyTorch exporter, not needed
 ```
@@ -95,12 +99,12 @@ implementation to drift. Four sets, chosen with `setFeatureSet()` and the third
 argument of `trainTMVA.C`. **Set ids are not variable counts** — 3 means the 3×3
 set and has 13 variables:
 
-| id | variables | needs towers? | works on picoDst? |
+| id | variables | needs towers? | on picoDst |
 |---|---|---|---|
-| 3 | 13 | yes | no |
-| 6 | 6 | no | **yes** |
-| 13 | 13 | yes | no |
-| 34 | 34 | yes | no |
+| 3 | 13 | yes | yes, tower list recovered (§7) |
+| 6 | 6 | no | **yes, nothing recovered** |
+| 13 | 13 | yes | yes, tower list recovered (§7) |
+| 34 | 34 | yes | yes, tower list recovered (§7) |
 
 **Set 3 — the 3×3 set. The best place to start.**
 
@@ -248,15 +252,21 @@ seed tower, plus a mask of which towers clustering assigned to this cluster. The
 
 ## 4. Sequence I would actually follow
 
-1. **Dump features from the GEANT `.fzd`, with `runFzd_ml.C`** — not from a
-   MuDst. The labels come from `StFcsHit::getGeantTracks()`, filled only by
-   `StFcsFastSimulatorMaker` as it converts `g2t_wca_hit`, plus the `g2t_track`
-   table for pid and parentage. **Neither survives into a MuDst or a picoDst**:
-   `StMuFcsHit` and `StPicoFcsHit` store detector id, id, adc and energy, and
-   nothing about which GEANT track deposited the energy. A feature dump made
-   from a MuDst has features with `truthNPhoton == -1` on every cluster, and
-   `trainTMVA.C` then skips all of them — with only the "not enough labelled
-   clusters" line to warn you. MuDst and picoDst are for *applying* a model.
+1. **Dump features from whichever tier you have** — `runFzd_ml.C`,
+   `runMudst_ml.C` mode 0, or `runPicoDst_ml.C` mode 0. All three write the same
+   `clusters` tree, and all three can label it, because there are **two kinds of
+   truth** and only one of them is fragile:
+   - *Hit level* — `StFcsHit::getGeantTracks()`, filled only by
+     `StFcsFastSimulatorMaker` as it converts `g2t_wca_hit`. `StMuFcsHit` and
+     `StPicoFcsHit` store detector id, id, adc and energy and nothing about which
+     GEANT track deposited it, so `trkPid` and `truthNPhoton` exist **only** on
+     the `.fzd` path.
+   - *Generator level* — the generated particles themselves. `StMuMcTrack` and
+     `StPicoMcTrack` are both built from `g2t_track_st`, so this **does** survive
+     into MuDst and picoDst, and it is what `mcLabel` is made of. `mcLabel` is
+     the label to train on; it needs no purity cut and does not care how GEANT
+     shared the deposits between primary and shower tracks.
+
    Also dump a data sample for the data/MC comparison of the input
    distributions, before trusting anything trained on simulation.
 2. **Check the label definition.** The class assignment at the top of the event
@@ -324,8 +334,9 @@ would rather train outside ROOT (PyTorch/sklearn). For TMVA they are dead weight
 
 ## 7. picoDst input
 
-`StFcsPicoCategoryMaker` + `runPicoDst_ml.C` run the categorization on
-`StPicoDst` files instead of MuDst. One thing decides how that path looks:
+`runPicoDst_ml.C` drives two makers: `StFcsPicoFeatureMaker` (mode 0, dumps the
+same `clusters` tree as the MuDst path) and `StFcsPicoCategoryMaker` (mode 1,
+applies a trained model). Two facts about the format decide how the path looks.
 
 **picoDst does not store which towers belong to a cluster.**
 `StPicoDstMaker::fillFcsClusters()` copies the scalar summary of each
@@ -334,24 +345,59 @@ theta, chi2Ndf1/2Photon, four-momentum — and drops `StMuFcsCluster::hits()`.
 `FcsHits` is written as a separate flat collection with no back-pointer. The
 association exists in the MuDst one step upstream and is lost in the conversion.
 
-So seven of the thirteen variables (`seedFrac`, `e2Frac`, `e1e2Asym`, `sigX`,
-`sigY`, `sigXY`, and `nNeighbor`) cannot be computed from a picoDst. Hence
-**feature set 6**: `logE`, `nTowers`, `sigmaMax`, `sigmaMin`, `sigmaRatio`,
-`theta` — defined identically to the first six of set 13, in the same
-`compute()`, so a model trained on MuDst applies to pico input unchanged.
-`testFeatures.C` asserts that equality rather than trusting it.
+That used to limit picoDst to **feature set 6**: `logE`, `nTowers`, `sigmaMax`,
+`sigmaMin`, `sigmaRatio`, `theta` — defined identically to the first six of set
+13, in the same `compute()`, so a model trained on MuDst applies to pico input
+unchanged. `testFeatures.C` asserts that equality rather than trusting it. Set 6
+is still the choice when you want nothing in the chain to be reconstructed.
+
+**The association is recoverable geometrically**, and `StFcsTowerAssoc.h` does
+it. `StFcsCluster::x(), y()` are the energy-weighted centroid in cell units and a
+tower id maps to a cell through `StFcsDb::getRowNumber/getColumnNumber`, centre
+at `(column − 0.5, row − 0.5)`; so every tower goes to the nearest centroid, and
+then each cluster keeps only the `nTowers` it says it has, highest energy first.
+That truncation is what makes it work — nearest-centroid alone is right half the
+time, with it:
+
+| over 167 ECal clusters of `pi0.e30.vz0.run6.picoDst.root` | |
+|---|---|
+| recovered `nTowers` exactly right | 92 % (97 % within ±1) |
+| recovered energy − stored energy | median **0.0000 GeV** |
+| recovered centroid − stored centroid | median 0.086 cells, no bias on either axis |
+
+So sets 3, 13 and 34 are computable on picoDst too. The rule the makers follow:
+**everything picoDst stores is read from the cluster** (energy, x, y, nTowers,
+the sigmas, theta — all exact), and the recovered towers are used only for what
+picoDst does not store — the seed, the fractions, the second moments, the
+3×3/5×5/11×11 grids. `nTowRec`, `eRec`, `dxRec`, `dyRec` in the output are there
+so you can repeat the table above on your own sample.
+
+**picoDst also carries the generator-level truth.** `StPicoMcTrack` and
+`StPicoMcVertex` come from the same `g2t_track`/`g2t_vertex` tables as
+`StMuMcTrack`, so `StFcsPicoFeatureMaker` fills `mcLabel`, `mcSep`, `mcSepCell`
+and `mcZgg` the same way. picoDst is therefore a full **training** input, not
+only an application input.
+
+No database is involved: `StFcsDbMaker` runs with `setDbAccess(0)` and StFcsDb
+falls back to its built-in tower map, cell sizes and detector positions, which is
+all the geometry this needs. That also sidesteps the run-number-1 calibration
+problem of the simulated MuDst path.
 
 The workflow, then:
 
 ```sh
-# train on MuDst (that is where the GEANT truth links are), with set 6
-root4star -b -q 'trainTMVA.C("feat.root","FcsCat",6)'
+# dump features from the picoDst itself
+root4star -b -q 'runPicoDst_ml.C("pi0.e30.vz0.all.picoDst.root",-1,0,3,"","feat_pico.root")'
 
-# look at pico input with no model at all, first
-root4star -b -q 'runPicoDst_ml.C("pi0.e30.vz0.all.picoDst.root",-1,0)'
+# check the reconstruction step before you lean on it
+root -l feat_pico.root
+clusters->Draw("nTowRec-nTowers")   // should peak hard at 0
+clusters->Draw("(eRec-e)/e")        // should peak hard at 0
+clusters->Draw("mcLabel")           // must not be all -1
 
-# then apply
-root4star -b -q 'runPicoDst_ml.C("pi0...root",-1,1,"weights/FcsCat6_BDTG.weights.xml")'
+# train, and apply
+root4star -b -q 'trainTMVA.C+("feat_pico.root","FcsCat",3)'
+root4star -b -q 'runPicoDst_ml.C("pi0...root",-1,1,3,"weights/FcsCat3_BDTG.weights.xml")'
 ```
 
 Three limits of the pico path, all structural rather than fixable in this code:
@@ -368,10 +414,12 @@ Three limits of the pico path, all structural rather than fixable in this code:
   they are identically zero for every cluster, so there is no fitter baseline to
   compare against on that file.
 
-If you want the full 13 on pico input, the clean fix is upstream: add the tower
-indices to `StPicoFcsCluster` and have `fillFcsClusters()` fill them, then
-re-produce. That is a `star-sw` change plus a production pass — worth it if pico
-becomes the main format for this analysis, not worth it for a study.
+The tower recovery removes the fourth limit but does not make it disappear: it is
+a reconstruction of the clustering, not a reading of it, and it is right for 92 %
+of clusters rather than all of them. The clean fix is still upstream — add the
+tower indices to `StPicoFcsCluster` and have `fillFcsClusters()` fill them, then
+re-produce. That is a `star-sw` change plus a production pass; worth proposing if
+pico becomes the main format for this analysis.
 
 ## 8. Not verified here
 
@@ -380,14 +428,27 @@ I wrote the makers against the STAR doxygen for `StFcsCluster`, `StFcsHit`,
 — there is no STAR library stack in this session. Expect to fix an include path
 or a signature on the first `cons`.
 
-What *is* compiled and tested: `StFcsClusterFeatures.h` (builds clean under
-`g++ -Wall`, and `testFeatures.C` passes all its invariant checks), and
-`StFcsMLP.h` against the weight exporter.
+What *is* compiled and tested: `StFcsClusterFeatures.h` and `StFcsTowerAssoc.h`
+(both build clean under `g++ -Wall -std=c++0x`, and `testFeatures.C` /
+`testAssoc.C` pass all their invariant checks), and `StFcsMLP.h` against the
+weight exporter.
 
-For the picoDst path specifically: the set-6 feature computation was run through
-`compute(6, ...)` on all 130 ECal clusters above 0.5 GeV in
-`pi0.e30.vz0.run3.picoDst.root` and agrees with an independent calculation to
-float precision, including the 8 clusters with `sigmaMax == 0` where
-`sigmaRatio` must not divide by zero. The ROOT I/O around it —
-`StPicoDstMaker`, the branch names, `StPicoDst::fcsCluster()` — is written from
-the `star-sw` headers and has not been run; that needs a `cons` build.
+For the picoDst path specifically:
+
+- the set-6 feature computation was run through `compute(6, ...)` on all 130 ECal
+  clusters above 0.5 GeV in `pi0.e30.vz0.run3.picoDst.root` and agrees with an
+  independent calculation to float precision, including the 8 clusters with
+  `sigmaMax == 0` where `sigmaRatio` must not divide by zero;
+- the tower association was run — as the compiled `StFcsTowerAssoc.h`, over the
+  real hit and cluster collections of `pi0.e30.vz0.run6.picoDst.root` — giving
+  the numbers in §7, and all four feature sets came out of the recovered towers
+  for all 167 clusters with no failures and no NaNs;
+- `StFcsPicoFeatureMaker.cxx` and `StFcsPicoCategoryMaker.cxx` were type-checked
+  against stub headers written from the real `star-sw` class declarations, so the
+  accessor names and signatures (`StPicoMcTrack::geantId()`, `idVtxStart()`,
+  `isFromShower()`, `StPicoMcVertex::position()`, `StPicoFcsHit::energy()`, …)
+  are right.
+
+The ROOT I/O and chain behaviour around all that — `StPicoDstMaker`, the branch
+status names, `StFcsDbMaker` with `setDbAccess(0)` in a pico chain — has not been
+run; that needs a `cons` build.
