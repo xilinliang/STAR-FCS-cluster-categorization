@@ -77,7 +77,8 @@ Int_t StFcsClusterFeatureMaker::Init() {
    mTree->Branch("sigmaMin", &bSigmaMin, "sigmaMin/F");
    mTree->Branch("theta", &bTheta, "theta/F");
    mTree->Branch("nTowers", &bNTowers, "nTowers/I");
-   mTree->Branch("nNeighbor", &bNNeighbor, "nNeighbor/I");
+   mTree->Branch("nNeighbor", &bNNeighbor, "nNeighbor/I");      // distinct neighbours
+   mTree->Branch("nNeighborRaw", &bNNeighborRaw, "nNeighborRaw/I");  // StFcsCluster::nNeighbor()
    mTree->Branch("nPoints", &bNPoints, "nPoints/I");
    mTree->Branch("catStar", &bCatStar, "catStar/I");
    mTree->Branch("chi2ndf1", &bChi2Ndf1, "chi2ndf1/F");
@@ -408,7 +409,34 @@ Int_t StFcsClusterFeatureMaker::Make() {
          bSigmaMin = clu->sigmaMin();
          bTheta = clu->theta();
          bNTowers = clu->nTowers();
-         bNNeighbor = clu->nNeighbor();
+         // NEIGHBOUR CLUSTERS, de-duplicated.
+         //
+         // StFcsCluster::mNeighbor is a plain vector that StFcsClusterMaker
+         // pushes into once per LINKING HIT, with no de-duplication, so
+         // nNeighbor() counts linkings and its value depends on the order hits
+         // were consumed in. That order cannot be reconstructed from a picoDst,
+         // where the whole tower association has to be rebuilt, so training on
+         // the raw count would give the model a variable that cannot be
+         // reproduced at application time on pico input.
+         //
+         // The feature is therefore the number of DISTINCT neighbouring
+         // clusters, which is the same quantity with the ordering dependence
+         // taken out, and StFcsTowerAssoc::neighborCounts computes exactly this
+         // on the picoDst side. The raw STAR count is kept as nNeighborRaw for
+         // anyone who wants it - it is not in any feature set.
+         bNNeighborRaw = clu->nNeighbor();
+         {
+            const StPtrVecFcsCluster& nb = clu->neighbor();
+            std::vector<const StFcsCluster*> uniq;
+            for (size_t k = 0; k < nb.size(); k++) {
+               if (!nb[k] || nb[k] == clu) continue;
+               bool have = false;
+               for (size_t u = 0; u < uniq.size(); u++)
+                  if (uniq[u] == nb[k]) have = true;
+               if (!have) uniq.push_back(nb[k]);
+            }
+            bNNeighbor = (int)uniq.size();
+         }
          bNPoints = clu->nPoints();
          bCatStar = clu->category();
          bChi2Ndf1 = clu->chi2Ndf1Photon();

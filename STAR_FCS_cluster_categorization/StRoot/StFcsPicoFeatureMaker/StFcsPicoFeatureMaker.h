@@ -18,10 +18,14 @@
 //     seedFrac / e2Frac / e1e2Frac, sigX / sigY / sigXY, the 11x11 img and mask
 //   generator-level truth, from StPicoMcTrack + StPicoMcVertex:
 //     mcLabel, nMcPhoton, mcE, mcDr, mcSep, mcSepCell, mcZgg
+//     nNeighbor - not stored either, but the tower adjacency it is built from
+//     survives, so it is recomputed as the number of DISTINCT neighbouring
+//     clusters; StFcsClusterFeatureMaker de-duplicates StFcsCluster::neighbor()
+//     to the same definition, so the two tiers agree. See StFcsTowerAssoc.h.
 //   NOT available at all:
 //     hit-level GEANT truth. StPicoFcsHit has no track links, so nTrk stays 0
 //     and truthNPhoton stays -1, exactly as on a MuDst. Train on mcLabel.
-//     nNeighbor and nPoints are not stored either; both are written as -1.
+//     nPoints, which needs an StFcsPoint collection: written as -1.
 //
 // So a picoDst is now a full training input, not just an application input:
 // mcLabel comes from the MC arrays and the tower list is recovered, which makes
@@ -79,6 +83,9 @@ class StFcsPicoFeatureMaker : public StMaker {
    // association itself.
    void setMaxTowerDistance(float cells) { mMaxDist = cells; }
    void setUseStoredNTowers(int v) { mUseNTow = v; }  // 1 = truncate to the stored nTowers
+   // Tower-adjacency distance for counting neighbour clusters, in cells. 1.01
+   // is StFcsClusterMaker's ECal setting (mNeighborDistance_Ecal).
+   void setNeighborDistance(float cells) { mNeighborDist = cells; }
 
    void setSaveMcTruth(int v) { mSaveMcTruth = v; }
    void setMcMatchRadius(float cm) { mMcMatchR = cm; }
@@ -101,6 +108,7 @@ class StFcsPicoFeatureMaker : public StMaker {
    float mTowerEmin;
    float mMaxDist;
    int mUseNTow;
+   float mNeighborDist;
    int mSaveMcTruth;
    float mMcMatchR;
    float mMcEmin;

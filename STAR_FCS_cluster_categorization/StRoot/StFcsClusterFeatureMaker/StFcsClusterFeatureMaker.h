@@ -92,6 +92,7 @@ class StFcsClusterFeatureMaker : public StMaker {
    Float_t bEta, bPhi, bPt;
    Float_t bSigmaMax, bSigmaMin, bTheta;
    Int_t bNTowers, bNNeighbor, bNPoints;
+   Int_t bNNeighborRaw;                     // StFcsCluster::nNeighbor() as stored, with repeats
    Int_t bCatStar;                          // category from StFcsClusterMaker (0/1/2)
    Float_t bChi2Ndf1, bChi2Ndf2;            // from StFcsPointMaker, 0 if it did not run
    Int_t bSeedId, bSeedRow, bSeedCol;

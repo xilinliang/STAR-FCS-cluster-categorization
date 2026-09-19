@@ -98,6 +98,7 @@ class StFcsPicoCategoryMaker : public StMaker {
    // See StFcsTowerAssoc.h; the defaults are the measured plateau.
    void setMaxTowerDistance(float cells) { mMaxDist = cells; }
    void setUseStoredNTowers(int v) { mUseNTow = v; }
+   void setNeighborDistance(float cells) { mNeighborDist = cells; }
 
   private:
    void bookHistograms();
@@ -107,7 +108,7 @@ class StFcsPicoCategoryMaker : public StMaker {
    // towE/towRow/towCol carry the recovered tower list (nTow entries, row and
    // column 1-based); pass nTow = 0 for set 6, which does not need one.
    int evaluate(StPicoFcsCluster* clu, int nTow, const float* towE, const int* towRow,
-                const int* towCol, float* feat, float* prob);
+                const int* towCol, int nNeighbor, float* feat, float* prob);
 
    StPicoDstMaker* mPicoDstMaker;
    StPicoDst* mPicoDst;
@@ -125,6 +126,7 @@ class StFcsPicoCategoryMaker : public StMaker {
    float mZggMax;
    float mMaxDist;
    int mUseNTow;
+   float mNeighborDist;
 
    Float_t mVar[kNVarMax];
 
@@ -132,7 +134,7 @@ class StFcsPicoCategoryMaker : public StMaker {
    TTree* mTree;
 
    // one entry per ECal cluster
-   Int_t bRun, bEvent, bDet, bClId, bNCluDet, bNTowers, bNTowRec, bCatStar, bCatML;
+   Int_t bRun, bEvent, bDet, bClId, bNCluDet, bNTowers, bNTowRec, bNNeighbor, bCatStar, bCatML;
    Float_t bE, bX, bY, bStarX, bStarY, bStarZ, bPt, bEta, bPhi;
    Float_t bSigmaMin, bSigmaMax, bTheta, bChi2Ndf1, bChi2Ndf2, bVz;
    Float_t bFeat[kNVarMax];

@@ -277,8 +277,42 @@ Feature sets — the id names the set, not the variable count:
 |---|---|---|---|
 | 3 | 13 | yes | yes, with the recovered tower list |
 | 6 | 6 | no | **yes, with nothing reconstructed** |
-| 13 | 13 | yes | yes, with the recovered tower list |
+| 13 | 13 | yes, **plus `nNeighbor`** | yes, both recovered |
 | 34 | 34 | yes | yes, with the recovered tower list |
+
+Set 13 is the only one that uses `nNeighbor`, and picoDst does not store it. It
+is recomputed from the recovered tower adjacency — see the next section — so set
+13 trains on picoDst like the rest. A feature file dumped before that existed has
+`nNeighbor` at −1 on every row, and TMVA kills the job outright on a variable
+with no spread:
+
+```
+<FATAL> DataSetFactory : Variable nNeighbor is constant. Please remove the variable.
+***> abort program execution
+```
+
+`trainTMVA.C` now catches that before TMVA does and says which variable and why.
+
+### nNeighbor, and why it is not STAR's number exactly
+
+`StFcsClusterMaker` calls two clusters neighbours when one hit is within 1.01
+cells of a tower of each, and records it by pushing into
+`StFcsCluster::mNeighbor` — **once per linking hit, with no de-duplication**. So
+`StFcsCluster::nNeighbor()` counts linkings, not clusters, and its value depends
+on the order hits were consumed in. That order cannot be reconstructed from a
+picoDst.
+
+The feature is therefore the number of **distinct** neighbouring clusters, on
+both tiers: `StFcsClusterFeatureMaker` de-duplicates `clu->neighbor()`, and
+`StFcsTowerAssoc::neighborCounts()` computes the same thing from the tower grid.
+The raw STAR count is still in the tree, as `nNeighborRaw`, and is in no feature
+set. On the sample that came with this code the distribution is 0: 74, 1: 84,
+2: 7, 3: 2 — a real variable, not a placeholder.
+
+One consequence worth knowing: STAR cross-links *every pair* of clusters that a
+single hit touches, so three clusters in a row all count as mutual neighbours,
+including the two at the ends that do not touch each other. `neighborCounts()`
+reproduces that rather than "fixing" it.
 
 Set 3 (the 3×3 tower set) is the recommended starting point. Set 6 is the one
 that needs nothing reconstructed anywhere, so it is the fallback if you ever
@@ -346,6 +380,8 @@ what the message says.
 | `StFcsPicoFeatureMaker::Init failed to get StFcsDb` | no `StFcsDbMaker` in the pico chain | add one and call `setDbAccess(0)`; `runPicoDst_ml.C` does |
 | every `mcLabel` is −1 from a picoDst | `McTrack`/`McVertex` switched off, or the picoDst was made without them | `picoMaker->SetStatus("McTrack*",1)` and `("McVertex*",1)` |
 | `nTowRec` is 0 for every cluster | `FcsHits` switched off in `SetStatus` | `picoMaker->SetStatus("FcsHits*",1)` |
+| `<FATAL> Variable <x> is constant. Please remove the variable.` + abort | an input variable the dumper could not fill, so it wrote a placeholder on every row | `trainTMVA.C` now names it and stops first; use a set that does not need it (only set 13 uses `nNeighbor`), or re-dump with a maker that fills it |
+| `Error: Symbol <Maker> is not defined in current scope` in a run macro | `gSystem->Load` for it sits below the declaration; CINT parses the whole body first | load every library at the top of the macro |
 | `cons` fails at `rootcint`, though the `.cxx` compiled | CINT cannot parse an implementation header pulled into a dictionary header | keep implementation headers in the `.cxx`; forward declare inside `#ifndef __CINT__` |
 | clusters land in implausible towers | geometry tag does not match the simulation | use the tag from the `.kumac` that made the `.fzd` |
 
@@ -353,7 +389,8 @@ what the message says.
 
 `StFcsClusterFeatures.h` and `StFcsTowerAssoc.h` compile clean under
 `g++ -Wall -std=c++0x`, and `testFeatures.C` / `testAssoc.C` pass their invariant
-checks. The set-6 features were verified against all 130 ECal clusters above
+checks — including the neighbour-counting rules, where the test caught the
+cross-linking behaviour above being different from what I first assumed. The set-6 features were verified against all 130 ECal clusters above
 0.5 GeV in a real picoDst, and the generator-level projection was checked against
 stub types with a synthetic π⁰ → γγ event.
 

@@ -54,6 +54,7 @@ StFcsPicoFeatureMaker::StFcsPicoFeatureMaker(StPicoDstMaker* picoMaker, const Ch
       mTowerEmin(0.0),
       mMaxDist(5.0),
       mUseNTow(1),
+      mNeighborDist(1.01),
       mSaveMcTruth(1),
       mMcMatchR(11.0),
       mMcEmin(0.0),
@@ -202,8 +203,8 @@ void StFcsPicoFeatureMaker::resetBranches() {
    bTruthNPhoton = -1;
    bTruthSameParent = -1;
    bTruthPurity = -1.0;
-   bNNeighbor = -1;  // not stored in picoDst
-   bNPoints = -1;    // not stored in picoDst
+   bNNeighbor = -1;  // recomputed below from the recovered tower adjacency
+   bNPoints = -1;    // not stored in picoDst, and nothing here can rebuild it
    bMcLabel = -1;
    bNMcPhoton = 0;
    bMcParentPid = 0;
@@ -438,6 +439,16 @@ Int_t StFcsPicoFeatureMaker::Make() {
       std::vector<int> owner;
       assign(tow, nc, &cluX[0], &cluY[0], &cluNTow[0], mMaxDist, owner);
 
+      // Neighbour clusters. StPicoFcsCluster does not store nNeighbor, and
+      // leaving it at a constant -1 is not harmless: TMVA refuses a constant
+      // input variable outright ("Variable nNeighbor is constant. Please remove
+      // the variable." followed by abort), which takes feature set 13 out with
+      // it. The adjacency it is built from survives into picoDst, so it is
+      // recomputed here - see the long note in StFcsTowerAssoc.h for what the
+      // number means and how it differs from StFcsCluster::nNeighbor().
+      std::vector<int> nNbr;
+      neighborCounts(tow, owner, nc, nRow, nCol, mNeighborDist, nNbr);
+
       std::vector<Tower> mine;
       for (int ic = 0; ic < nc; ic++) {
          StPicoFcsCluster* clu = mPicoDst->fcsCluster(cluIdx[ic]);
@@ -455,6 +466,7 @@ Int_t StFcsPicoFeatureMaker::Make() {
          bSigmaMin = clu->sigmaMin();
          bTheta = clu->theta();
          bNTowers = clu->nTowers();
+         bNNeighbor = (ic < (int)nNbr.size()) ? nNbr[ic] : -1;
          bCatStar = clu->category();
          bChi2Ndf1 = clu->chi2Ndf1Photon();
          bChi2Ndf2 = clu->chi2Ndf2Photon();

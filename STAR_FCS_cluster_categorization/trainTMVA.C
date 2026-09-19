@@ -121,6 +121,14 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    const bool haveMcBranch = (in->GetBranch("mcLabel") != 0);
    Long64_t nBelowE = 0, nNoTruth = 0, nImpure = 0, nNoTowers = 0;
 
+   // range of every input variable over the kept clusters. TMVA aborts the
+   // whole job on a constant one - see the check after the loop.
+   Float_t vmin[kNVarMax], vmax[kNVarMax];
+   for (int i = 0; i < NVAR; i++) {
+      vmin[i] = 1e30;
+      vmax[i] = -1e30;
+   }
+
    for (Long64_t i = 0; i < n; i++) {
       in->GetEntry(i);
       if (e < eMin) {
@@ -191,6 +199,10 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
          nNoTowers++;
          continue;
       }
+      for (int i = 0; i < NVAR; i++) {
+         if (v[i] < vmin[i]) vmin[i] = v[i];
+         if (v[i] > vmax[i]) vmax[i] = v[i];
+      }
       t[cls]->Fill();
       kept[cls]++;
    }
@@ -235,6 +247,50 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    if (kept[1] < 100 || kept[2] < 100)
       printf("  WARNING: thin classes - the model will not be worth much yet\n");
    printf("\n");
+
+   // ------------------------------------------------- constant-variable check
+   //
+   // TMVA does not skip a variable that never changes, it kills the job:
+   //   <FATAL> DataSetFactory : Variable nNeighbor is constant. Please remove
+   //                            the variable.
+   //   ***> abort program execution
+   // and by then it has already printed two screens of setup, so the cause is
+   // easy to miss. Catch it here, where the reason can be explained.
+   //
+   // Dropping the offending variable automatically would be worse than
+   // stopping: the weight file would then hold NVAR-1 variables while
+   // StFcsClusterFeatures::compute() still produces NVAR in a fixed order, and
+   // TMVA::Reader would refuse the model at application time - or, worse,
+   // silently pair up the wrong ones. Training and inference share one
+   // definition of the inputs in this package, and that is worth keeping.
+   {
+      int nConst = 0;
+      for (int i = 0; i < NVAR; i++) {
+         if (vmax[i] > vmin[i]) continue;
+         if (nConst == 0)
+            printf("--- constant input variables (TMVA would abort on these) ---\n");
+         printf("  %-12s is always %g\n", varname[i], vmin[i]);
+         nConst++;
+      }
+      if (nConst > 0) {
+         printf("\nA variable with no spread carries no information, and TMVA refuses it.\n");
+         printf("Usual cause: the input tier does not store that quantity, so the dumper\n");
+         printf("wrote a placeholder on every cluster. nNeighbor and nPoints are the two\n");
+         printf("that picoDst does not carry directly.\n\n");
+         printf("Options, in order of preference:\n");
+         printf("  - use a feature set that does not need it. Only set 13 uses nNeighbor;\n");
+         printf("    sets 3, 6 and 34 do not:\n");
+         printf("      trainTMVA.C+(\"%s\",\"%s\",3)\n", infile, jobname);
+         printf("  - re-dump with a maker that fills it. StFcsPicoFeatureMaker computes\n");
+         printf("    nNeighbor from the recovered tower adjacency; a feature file made\n");
+         printf("    before that existed has it at -1 everywhere.\n");
+         printf("  - if the sample itself is the reason (a single-particle gun where no\n");
+         printf("    cluster ever has a neighbour), train on a mixed sample, or use set 3.\n");
+         printf("\nStopping before TMVA.\n");
+         ftmp->Close();
+         return;
+      }
+   }
 
    // --------------------------------------------------------------- TMVA
    TFile* fout = TFile::Open(job + ".root", "RECREATE");

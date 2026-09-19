@@ -203,6 +203,91 @@ int testAssoc() {
             "cellX/cellY reproduce the cluster centroid convention");
    }
 
+   // ----------------------------------------------------- neighbour counting
+   //
+   // Hand-built tower sets, so the right answer is not in doubt. Towers are
+   // (row, col), 1-based, and clusters touch when their towers are 4-adjacent.
+   {
+      std::vector<Tower> tow;
+      std::vector<int> owner;
+      // cluster 0 at columns 5-6, cluster 1 at columns 7-8 (touching),
+      // cluster 2 far away at column 18
+      const int col[6] = {5, 6, 7, 8, 18, 19};
+      const int own[6] = {0, 0, 1, 1, 2, 2};
+      for (int i = 0; i < 6; i++) {
+         Tower t;
+         t.id = i;
+         t.row = 17;
+         t.col = col[i];
+         t.e = 1.0;
+         tow.push_back(t);
+         owner.push_back(own[i]);
+      }
+      std::vector<int> n;
+      neighborCounts(tow, owner, 3, 34, 22, 1.01f, n);
+      printf("neighbourCounts():\n");
+      check(n.size() == 3, "one count per cluster");
+      check(n[0] == 1 && n[1] == 1, "two touching clusters are each other's neighbour");
+      check(n[2] == 0, "a cluster eight columns away has no neighbour");
+
+      // Three single-tower clusters in a row, at columns 5, 6, 7. All THREE
+      // come out as mutual neighbours, not a chain - and that is right rather
+      // than sloppy. StFcsClusterMaker cross-links every pair of clusters that
+      // a single hit touches, so the tower at column 6, which touches both of
+      // its neighbours, makes the clusters at 5 and 7 neighbours of each other
+      // as well, two cells apart though they are. Reproducing that is the point.
+      std::vector<Tower> row3;
+      std::vector<int> own3;
+      for (int i = 0; i < 3; i++) {
+         Tower t;
+         t.id = i;
+         t.row = 17;
+         t.col = 5 + i;
+         t.e = 1.0;
+         row3.push_back(t);
+         own3.push_back(i);
+      }
+      std::vector<int> n3;
+      neighborCounts(row3, own3, 3, 34, 22, 1.01f, n3);
+      check(n3[0] == 2 && n3[1] == 2 && n3[2] == 2,
+            "one hit touching two clusters makes those two neighbours as well");
+
+      // diagonal only: not a neighbour at 1.01, is one at 1.42
+      std::vector<Tower> diag;
+      std::vector<int> ownd;
+      Tower a;
+      a.id = 0; a.row = 17; a.col = 5; a.e = 1.0;
+      Tower b;
+      b.id = 1; b.row = 18; b.col = 6; b.e = 1.0;
+      diag.push_back(a); ownd.push_back(0);
+      diag.push_back(b); ownd.push_back(1);
+      std::vector<int> nd;
+      neighborCounts(diag, ownd, 2, 34, 22, 1.01f, nd);
+      check(nd[0] == 0, "diagonal towers do not touch at 1.01 cells (StFcsClusterMaker's ECal rule)");
+      neighborCounts(diag, ownd, 2, 34, 22, 1.42f, nd);
+      check(nd[0] == 1, "...and do at 1.42");
+
+      // an unassigned tower bridges two clusters, as an unclustered hit does
+      // in StFcsClusterMaker
+      std::vector<Tower> br;
+      std::vector<int> ownb;
+      const int bcol[3] = {5, 6, 7};
+      const int bown[3] = {0, -1, 1};
+      for (int i = 0; i < 3; i++) {
+         Tower t;
+         t.id = i; t.row = 17; t.col = bcol[i]; t.e = 1.0;
+         br.push_back(t);
+         ownb.push_back(bown[i]);
+      }
+      std::vector<int> nb;
+      neighborCounts(br, ownb, 2, 34, 22, 1.01f, nb);
+      check(nb[0] == 1 && nb[1] == 1, "an unassigned tower between two clusters links them");
+
+      std::vector<int> none;
+      neighborCounts(tow, owner, 1, 34, 22, 1.01f, none);
+      check(none.size() == 1 && none[0] == 0, "a single cluster has no neighbours");
+   }
+
    printf("\n%s\n", nFail ? "SOME CHECKS FAILED" : "all checks passed");
    return nFail;
 }

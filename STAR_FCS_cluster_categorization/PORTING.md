@@ -365,6 +365,15 @@ time, with it:
 | recovered energy − stored energy | median **0.0000 GeV** |
 | recovered centroid − stored centroid | median 0.086 cells, no bias on either axis |
 
+`nNeighbor`, which only set 13 uses, is recovered the same way: two clusters are
+neighbours when a hit sits within 1.01 cells of a tower of each, which is
+`StFcsClusterMaker`'s own ECal rule. What is stored in the tree is the number of
+**distinct** neighbouring clusters, because `StFcsCluster::mNeighbor` is pushed
+into once per linking hit with no de-duplication and so depends on the order hits
+were consumed in — an order a picoDst cannot reproduce.
+`StFcsClusterFeatureMaker` de-duplicates its list to match, and keeps the raw
+STAR count in a new branch `nNeighborRaw` that is in no feature set.
+
 So sets 3, 13 and 34 are computable on picoDst too. The rule the makers follow:
 **everything picoDst stores is read from the cluster** (energy, x, y, nTowers,
 the sigmas, theta — all exact), and the recovered towers are used only for what

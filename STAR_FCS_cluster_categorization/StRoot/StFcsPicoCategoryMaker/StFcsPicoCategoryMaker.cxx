@@ -60,6 +60,7 @@ ClassImp(StFcsPicoCategoryMaker)
       mZggMax(0.7),
       mMaxDist(5.0),
       mUseNTow(1),
+      mNeighborDist(1.01),
       mFile(0),
       mTree(0),
       mNEvents(0),
@@ -141,6 +142,7 @@ Int_t StFcsPicoCategoryMaker::Init() {
    mTree->Branch("phi", &bPhi, "phi/F");
    mTree->Branch("nTowers", &bNTowers, "nTowers/I");
    mTree->Branch("nTowRec", &bNTowRec, "nTowRec/I");  // towers the association gave it
+   mTree->Branch("nNeighbor", &bNNeighbor, "nNeighbor/I");
    mTree->Branch("sigmaMin", &bSigmaMin, "sigmaMin/F");
    mTree->Branch("sigmaMax", &bSigmaMax, "sigmaMax/F");
    mTree->Branch("theta", &bTheta, "theta/F");
@@ -173,8 +175,8 @@ void StFcsPicoCategoryMaker::bookHistograms() {
 // Build the feature vector for one picoDst cluster and, if a model is loaded,
 // evaluate it. feat[] must hold nVar(mFeatureSet) floats, prob[] three.
 int StFcsPicoCategoryMaker::evaluate(StPicoFcsCluster* clu, int nTow, const float* towE,
-                                     const int* towRow, const int* towCol, float* feat,
-                                     float* prob) {
+                                     const int* towRow, const int* towCol, int nNeighbor,
+                                     float* feat, float* prob) {
    const int nv = nVar(mFeatureSet);
    for (int k = 0; k < 3; k++) prob[k] = 0.0;
 
@@ -188,7 +190,10 @@ int StFcsPicoCategoryMaker::evaluate(StPicoFcsCluster* clu, int nTow, const floa
    c.sigmaMax = clu->sigmaMax();
    c.theta = clu->theta();
    c.nTowers = clu->nTowers();
-   c.nNeighbor = 0;  // not stored in picoDst; unused by sets 3, 6 and 13
+   // Not stored in picoDst - recomputed from the tower adjacency by
+   // StFcsTowerAssoc::neighborCounts, so that set 13 sees the same variable here
+   // as it did in training. Only set 13 uses it.
+   c.nNeighbor = nNeighbor;
    c.xw = mFcsDb ? mFcsDb->getXWidth(det) : 0;
    c.yw = mFcsDb ? mFcsDb->getYWidth(det) : 0;
    // Empty for set 6, which needs no tower list; recovered by StFcsTowerAssoc
@@ -286,8 +291,12 @@ Int_t StFcsPicoCategoryMaker::Make() {
       if (nc == 0) continue;
 
       std::vector<int> owner;
-      if (!tow.empty())
+      std::vector<int> nNbr;
+      if (!tow.empty()) {
          StFcsTowerAssoc::assign(tow, nc, &cx[0], &cy[0], &cn[0], mMaxDist, owner);
+         StFcsTowerAssoc::neighborCounts(tow, owner, nc, mFcsDb->nRow(det), mFcsDb->nColumn(det),
+                                         mNeighborDist, nNbr);
+      }
 
       std::vector<StFcsTowerAssoc::Tower> mine;
       std::vector<float> te;
@@ -312,8 +321,9 @@ Int_t StFcsPicoCategoryMaker::Make() {
 
          float f[kNVarMax];
          float p[3];
+         const int nNb = (ic < (int)nNbr.size()) ? nNbr[ic] : 0;
          const int catML = evaluate(clu, nTow, nTow ? &te[0] : 0, nTow ? &trow[0] : 0,
-                                    nTow ? &tcol[0] : 0, f, p);
+                                    nTow ? &tcol[0] : 0, nNb, f, p);
          mCatML[i] = catML;
 
          if (clu->energy() < mEmin) continue;  // tree and QA threshold
@@ -325,6 +335,7 @@ Int_t StFcsPicoCategoryMaker::Make() {
          bY = clu->y();
          bNTowers = clu->nTowers();
          bNTowRec = nTow;
+         bNNeighbor = nNb;
          bSigmaMin = clu->sigmaMin();
          bSigmaMax = clu->sigmaMax();
          bTheta = clu->theta();

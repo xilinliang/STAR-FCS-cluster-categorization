@@ -131,6 +131,87 @@ inline void gather(const std::vector<Tower>& tow, const std::vector<int>& owner,
       if (owner[i] == c) out.push_back(tow[i]);
 }
 
+// ---------------------------------------------------------------------------
+// Neighbour clusters.
+//
+// StFcsClusterMaker calls two clusters neighbours when some hit is within
+// mNeighborDistance_Ecal = 1.01 cells of a tower of each - that is, when they
+// touch across the 4-neighbourhood of a tower. It records that by pushing a
+// pointer into StFcsCluster::mNeighbor, and nNeighbor() is that vector's size.
+//
+// TWO THINGS TO KNOW BEFORE USING THIS.
+//
+// First, the vector is not de-duplicated: every hit that sees the same pair
+// pushes again, so STAR's nNeighbor() counts LINKINGS, not distinct clusters,
+// and its value depends on the order hits were consumed in. That order cannot
+// be recovered from a picoDst. What is computed here is the number of DISTINCT
+// neighbouring clusters, which is the same quantity with the ordering
+// dependence taken out - and StFcsClusterFeatureMaker de-duplicates the STAR
+// list the same way, so both tiers feed the model the same definition. The raw
+// STAR count is still written to the tree, as nNeighborRaw, wherever it exists.
+//
+// Second, on picoDst this runs on the RECOVERED tower lists, so it inherits
+// their accuracy. Adjacency is the robust part of that - a tower assigned to
+// the wrong one of two touching clusters leaves them touching either way - but
+// it is a reconstruction, not a reading.
+//
+//   tow/owner   as they come out of assign()
+//   nRow,nCol   detector size, from StFcsDb
+//   dist        1.01 reproduces StFcsClusterMaker's ECal setting; a larger
+//               value widens the neighbourhood (1.42 would take the diagonals)
+inline void neighborCounts(const std::vector<Tower>& tow, const std::vector<int>& owner, int nClu,
+                           int nRow, int nCol, float dist, std::vector<int>& nNeighbor) {
+   nNeighbor.assign(nClu > 0 ? nClu : 0, 0);
+   if (nClu <= 1 || tow.empty() || nRow <= 0 || nCol <= 0) return;
+
+   // grid -> tower index, so the neighbourhood of a tower is a lookup rather
+   // than a scan over every other tower
+   std::vector<int> cell((size_t)nRow * nCol, -1);
+   for (size_t i = 0; i < tow.size(); i++) {
+      if (tow[i].row < 1 || tow[i].row > nRow || tow[i].col < 1 || tow[i].col > nCol) continue;
+      cell[(size_t)(tow[i].row - 1) * nCol + (tow[i].col - 1)] = (int)i;
+   }
+
+   // offsets within dist of a cell centre, diagonals included only if dist allows
+   const int reach = (int)dist + 1;
+   std::vector<int> adj((size_t)nClu * nClu, 0);
+   std::vector<int> seen;
+
+   for (size_t i = 0; i < tow.size(); i++) {
+      // clusters owning this tower or any tower within dist of it. A tower that
+      // assign() left unowned still acts as a bridge here, exactly as an
+      // unclustered hit does in StFcsClusterMaker.
+      seen.clear();
+      for (int dr = -reach; dr <= reach; dr++) {
+         for (int dc = -reach; dc <= reach; dc++) {
+            if (double(dr) * dr + double(dc) * dc > double(dist) * dist) continue;
+            const int r = tow[i].row + dr, c = tow[i].col + dc;
+            if (r < 1 || r > nRow || c < 1 || c > nCol) continue;
+            const int j = cell[(size_t)(r - 1) * nCol + (c - 1)];
+            if (j < 0) continue;
+            const int o = (j < (int)owner.size()) ? owner[j] : -1;
+            if (o < 0 || o >= nClu) continue;
+            bool have = false;
+            for (size_t k = 0; k < seen.size(); k++)
+               if (seen[k] == o) have = true;
+            if (!have) seen.push_back(o);
+         }
+      }
+      for (size_t a = 0; a + 1 < seen.size(); a++)
+         for (size_t b = a + 1; b < seen.size(); b++) {
+            adj[(size_t)seen[a] * nClu + seen[b]] = 1;
+            adj[(size_t)seen[b] * nClu + seen[a]] = 1;
+         }
+   }
+
+   for (int c = 0; c < nClu; c++) {
+      int n = 0;
+      for (int d = 0; d < nClu; d++)
+         if (d != c && adj[(size_t)c * nClu + d]) n++;
+      nNeighbor[c] = n;
+   }
+}
+
 }  // namespace StFcsTowerAssoc
 
 #endif
