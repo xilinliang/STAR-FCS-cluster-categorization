@@ -236,9 +236,16 @@ void StFcsClusterFeatureMaker::addMcPhoton(int id, int parent, int parentPid, fl
 
 //-----------------------------------------------------------------------------
 void StFcsClusterFeatureMaker::collectMcPhotons() {
-   if (mMcExternal) return;  // already supplied for this event, e.g. from MuDst
+   // Photons injected by StFcsMuMcTruthMaker. It calls clearMcPhotons() only
+   // when the MC arrays exist, so an injected-but-empty list means "truth
+   // present, no photon" - a pi- event - not "no truth".
+   if (mMcExternal) {
+      mHaveMc = 1;
+      return;
+   }
    mMcPhotons.clear();
    bNMcPhotonEvent = 0;
+   mHaveMc = 0;
    if (!mSaveMcTruth) return;
 
    St_g2t_track* trkTable = (St_g2t_track*)GetDataSet("g2t_track");
@@ -246,6 +253,7 @@ void StFcsClusterFeatureMaker::collectMcPhotons() {
    St_g2t_vertex* vtxTable = (St_g2t_vertex*)GetDataSet("g2t_vertex");
    if (!vtxTable) vtxTable = (St_g2t_vertex*)GetDataSet("geant/g2t_vertex");
    if (!trkTable || !vtxTable) return;  // not a simulation chain: stays empty
+   mHaveMc = 1;                         // truth exists, photons or not
 
    g2t_track_st* trk = trkTable->GetTable();
    g2t_vertex_st* vtx = vtxTable->GetTable();
@@ -299,7 +307,10 @@ void StFcsClusterFeatureMaker::collectMcPhotons() {
 // tracks. For a pi0 gun, mcSep / mcSepCell is the variable that maps the merge
 // transition - the separation at which two photons stop making two clusters.
 void StFcsClusterFeatureMaker::matchMcPhotons(StFcsCluster* clu, int det) {
-   if (!mSaveMcTruth || mMcPhotons.empty()) return;
+   // No early return on an empty photon list - see the same note in
+   // StFcsPicoFeatureMaker::matchMcPhotons. Truth present with no photon
+   // pointing here is mcLabel = 0, the hadron class, not -1.
+   if (!mSaveMcTruth || !mHaveMc) return;
 
    const StThreeVectorD cpos = mFcsDb->getStarXYZfromColumnRow(det, clu->x(), clu->y());
 

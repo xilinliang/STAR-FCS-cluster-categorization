@@ -312,7 +312,8 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    factory->PrepareTrainingAndTestTree("", "SplitMode=Random:NormMode=NumEvents:!V");
    factory->BookMethod(TMVA::Types::kBDT, "BDTG",
                        "!H:!V:NTrees=600:MaxDepth=4:BoostType=Grad:Shrinkage=0.10:"
-                       "UseBaggedBoost:BaggedSampleFraction=0.5:nCuts=40");
+                       "UseBaggedBoost:BaggedSampleFraction=0.5:nCuts=40:"
+                       "NegWeightTreatment=IgnoreNegWeightsInTraining");
    factory->BookMethod(TMVA::Types::kMLP, "MLP",
                        "!H:!V:NeuronType=tanh:NCycles=600:HiddenLayers=N+5,N:"
                        "TestRate=5:EstimatorType=CE:UseRegulator:VarTransform=Norm");

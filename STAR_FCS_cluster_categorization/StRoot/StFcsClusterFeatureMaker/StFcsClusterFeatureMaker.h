@@ -135,6 +135,7 @@ class StFcsClusterFeatureMaker : public StMaker {
    int mSaveMcTruth = 1;
    float mMcMatchR = 11.0;  // cm, about two ECal towers
    int mMcExternal = 0;     // 1 when photons were injected for this event
+   int mHaveMc = 0;         // 1 when this event carries MC truth, photons or not
 
    // hidden from CINT and kept last - rootcint cannot digest a nested struct
    // plus std::vector in a dictionary header

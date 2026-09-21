@@ -112,6 +112,7 @@ class StFcsPicoFeatureMaker : public StMaker {
    int mSaveMcTruth;
    float mMcMatchR;
    float mMcEmin;
+   int mHaveMc;  // 1 when this event carries an MC record, photons or not
 
    Long64_t mNEvents, mNCluster, mNNoMcArray;
 

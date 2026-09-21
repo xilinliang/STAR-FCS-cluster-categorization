@@ -58,6 +58,7 @@ StFcsPicoFeatureMaker::StFcsPicoFeatureMaker(StPicoDstMaker* picoMaker, const Ch
       mSaveMcTruth(1),
       mMcMatchR(11.0),
       mMcEmin(0.0),
+      mHaveMc(0),
       mNEvents(0),
       mNCluster(0),
       mNNoMcArray(0) {}
@@ -268,6 +269,7 @@ void StFcsPicoFeatureMaker::projectPhoton(McPhoton& ph) {
 void StFcsPicoFeatureMaker::collectMcPhotons() {
    mMcPhotons.clear();
    bNMcPhotonEvent = 0;
+   mHaveMc = 0;
    if (!mSaveMcTruth) return;
 
    const int ntrk = (int)mPicoDst->numberOfMcTracks();
@@ -276,6 +278,10 @@ void StFcsPicoFeatureMaker::collectMcPhotons() {
       mNNoMcArray++;
       return;
    }
+   // The MC record exists for this event, whether or not it contains a
+   // generated photon. That distinction is what separates mcLabel = 0 (truth
+   // says: no photon here) from mcLabel = -1 (no truth at all).
+   mHaveMc = 1;
 
    for (int i = 0; i < ntrk; i++) {
       StPicoMcTrack* t = mPicoDst->mcTrack(i);
@@ -331,7 +337,12 @@ void StFcsPicoFeatureMaker::collectMcPhotons() {
 // the MuDst side: how many GENERATED photons project within mMcMatchR of the
 // cluster, capped at 2.
 void StFcsPicoFeatureMaker::matchMcPhotons(float cluX, float cluY, int det) {
-   if (!mSaveMcTruth || mMcPhotons.empty()) return;
+   // NO early return on an empty photon list. An event with MC truth but no
+   // generated photon - every event of a pi- gun, for instance - is exactly
+   // where class 0 comes from, and it must come out as mcLabel = 0. Returning
+   // here used to leave those clusters at -1, i.e. "no truth", and trainTMVA.C
+   // then threw the whole hadron sample away and trained class 0 on scraps.
+   if (!mSaveMcTruth || !mHaveMc) return;
 
    const StThreeVectorD cpos = mFcsDb->getStarXYZfromColumnRow(det, cluX, cluY);
 
