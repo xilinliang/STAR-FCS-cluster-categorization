@@ -45,6 +45,7 @@
 //
 // author: generated for Xilin Liang
 
+#include "TCut.h"
 #include "TFile.h"
 #include "TString.h"
 #include "TSystem.h"
@@ -53,6 +54,7 @@
 #include "TMVA/Tools.h"
 
 #include "StRoot/StFcsMLCategoryMaker/StFcsClusterFeatures.h"
+#include "StRoot/StFcsMLCategoryMaker/StFcsTrainTestSplit.h"
 
 void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
                const char* jobname = "FcsCat",
@@ -79,6 +81,9 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    Float_t e, x, y, sigmaMin, sigmaMax, theta, xw, yw, truthPurity;
    Float_t img[NW * NW], mask[NW * NW];
    Int_t nTowers, nNeighbor, seedRow, seedCol, catStar, truthNPhoton, mcLabel;
+   Int_t run = 0, event = 0;
+   in->SetBranchAddress("run", &run);      // for the train/test split, see below
+   in->SetBranchAddress("event", &event);
    in->SetBranchAddress("e", &e);
    in->SetBranchAddress("x", &x);
    in->SetBranchAddress("y", &y);
@@ -105,10 +110,18 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    Float_t v[kNVarMax];
    TTree* t[3];
    const char* clsname[3] = {"other", "onePhoton", "twoPhoton"};
+   // TRAIN/TEST SPLIT. Not TMVA's SplitMode=Random: that picks the test half
+   // with an internal seed nobody outside TMVA can reproduce, so a later
+   // efficiency/purity study (evalCategory.C) could not avoid the training
+   // clusters. The split is made here instead, by whole event, with the rule
+   // in StFcsTrainTestSplit.h that evalCategory.C applies too.
+   Float_t isTest = 0;
+   StFcsTrainTestSplit::EventSplitter splitter;
    for (int c = 0; c < 3; c++) {
       t[c] = new TTree(clsname[c], clsname[c]);
       for (int i = 0; i < NVAR; i++)
          t[c]->Branch(varname[i], &v[i], Form("%s/F", varname[i]));
+      t[c]->Branch("isTest", &isTest, "isTest/F");
    }
 
    const int half = NW / 2;
@@ -116,6 +129,7 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    int trow[NW * NW], tcol[NW * NW];
    Long64_t n = in->GetEntries();
    Long64_t kept[3] = {0, 0, 0};
+   Long64_t keptTest[3] = {0, 0, 0};
 
    // accounting, so that an empty training sample explains itself
    const bool haveMcBranch = (in->GetBranch("mcLabel") != 0);
@@ -131,6 +145,9 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
 
    for (Long64_t i = 0; i < n; i++) {
       in->GetEntry(i);
+      // before ANY selection, so the event count - and with it the split -
+      // does not depend on the cuts
+      isTest = (Float_t)splitter.isTest(run, event);
       if (e < eMin) {
          nBelowE++;
          continue;
@@ -146,18 +163,9 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
       //
       // truthNPhoton (hit level) is the fallback for feature files made before
       // the generator-level branches existed.
-      int cls = -1;
-      if (mcLabel >= 0) {
-         cls = mcLabel;  // 0, 1 or 2 already
-      } else if (truthNPhoton >= 0) {
-         if (truthNPhoton >= 2) {
-            cls = 2;
-         } else if (truthNPhoton == 1 && truthPurity >= purityCut) {
-            cls = 1;
-         } else if (truthNPhoton == 0 && truthPurity >= purityCut) {
-            cls = 0;
-         }
-      }
+      // the rule itself lives in StFcsTrainTestSplit.h, so that evalCategory.C
+      // judges the model against exactly the labels it was trained on
+      const int cls = StFcsTrainTestSplit::trainingLabel(mcLabel, truthNPhoton, truthPurity, purityCut);
       if (cls < 0) {
          if (mcLabel < 0 && truthNPhoton < 0)
             nNoTruth++;  // no truth at all on this cluster
@@ -205,6 +213,7 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
       }
       t[cls]->Fill();
       kept[cls]++;
+      if (isTest > 0.5) keptTest[cls]++;
    }
    // ------------------------------------------------------------ accounting
    printf("\n--- where the %lld clusters in %s went ---\n", n, infile);
@@ -213,6 +222,9 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    printf("  truth present, cut by purity : %lld\n", nImpure);
    printf("  no usable tower list         : %lld\n", nNoTowers);
    printf("  KEPT  other=%lld  1photon=%lld  2photon=%lld\n", kept[0], kept[1], kept[2]);
+   printf("  split by event (%ld events): train %lld / %lld / %lld, test %lld / %lld / %lld\n",
+          splitter.nEvents(), kept[0] - keptTest[0], kept[1] - keptTest[1], kept[2] - keptTest[2],
+          keptTest[0], keptTest[1], keptTest[2]);
    printf("  label source: %s\n", haveMcBranch ? "mcLabel (generator level)"
                                                : "truthNPhoton (hit level); no mcLabel branch");
 
@@ -247,6 +259,25 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    if (kept[1] < 100 || kept[2] < 100)
       printf("  WARNING: thin classes - the model will not be worth much yet\n");
    printf("\n");
+
+   // --------------------------------------------------------- split check
+   //
+   // The split counts events by watching (run, event) change between
+   // consecutive tree entries. If a dumper ever wrote the same run and event
+   // number on every cluster, that would be ONE event, everything would land on
+   // the training side, and TMVA would have nothing to test on.
+   for (int c = 0; c < 3; c++) {
+      if (kept[c] == 0) continue;
+      if (keptTest[c] == 0 || keptTest[c] == kept[c]) {
+         printf("\nThe train/test split put every '%s' cluster on one side.\n", clsname[c]);
+         printf("It splits by event, using the run and event branches, and found only\n");
+         printf("%ld event(s) in %lld clusters - those branches are probably not filled.\n",
+                splitter.nEvents(), n);
+         printf("Stopping before TMVA.\n");
+         ftmp->Close();
+         return;
+      }
+   }
 
    // ------------------------------------------------- constant-variable check
    //
@@ -308,8 +339,13 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    //   dl->AddVariable(...); dl->AddTree(...); dl->PrepareTrainingAndTestTree(...);
    //   factory->BookMethod(dl, TMVA::Types::kBDT, "BDTG", "...");
    for (int i = 0; i < NVAR; i++) factory->AddVariable(varname[i], 'F');
-   for (int c = 0; c < 3; c++) factory->AddTree(t[c], clsname[c]);
-   factory->PrepareTrainingAndTestTree("", "SplitMode=Random:NormMode=NumEvents:!V");
+   // Each class tree goes in twice, once per side of the split, so TMVA trains
+   // and tests on exactly the clusters StFcsTrainTestSplit assigned.
+   for (int c = 0; c < 3; c++) {
+      factory->AddTree(t[c], clsname[c], 1.0, TCut("isTest<0.5"), TMVA::Types::kTraining);
+      factory->AddTree(t[c], clsname[c], 1.0, TCut("isTest>0.5"), TMVA::Types::kTesting);
+   }
+   factory->PrepareTrainingAndTestTree("", "NormMode=NumEvents:!V");
    factory->BookMethod(TMVA::Types::kBDT, "BDTG",
                        "!H:!V:NTrees=600:MaxDepth=4:BoostType=Grad:Shrinkage=0.10:"
                        "UseBaggedBoost:BaggedSampleFraction=0.5:nCuts=40:"

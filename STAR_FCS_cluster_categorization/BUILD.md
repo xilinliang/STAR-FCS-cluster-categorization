@@ -10,6 +10,7 @@ you repeat.
                           or runPicoDst_ml.C mode 0  on a picoDst with MC arrays
   2. check the truth      three draw commands on feat_*.root
   3. train                trainTMVA.C+    feat   -> weights/*.xml
+     evaluate             evalCategory.C+ feat + weights -> efficiency, purity, plots
   4. apply                runMudst_ml.C   (MuDst)  or  runPicoDst_ml.C (picoDst)
 ```
 
@@ -326,6 +327,61 @@ major versions.
 
 The macro prints an account of where every cluster went. If it keeps nothing it
 stops before TMVA and names the reason rather than aborting inside it.
+
+**The train/test split is by event, and deterministic.** `trainTMVA.C` no longer
+lets TMVA pick the test half at random: even-numbered events train, odd ones
+test, with every cluster of an event on the same side (the two photon clusters of
+one π⁰ are correlated, and splitting them would leak information). The rule is in
+`StFcsTrainTestSplit.h`, together with the class-label rule, and `evalCategory.C`
+uses the same header — so it can evaluate on exactly the clusters the model never
+saw. A weight file trained *before* this change used TMVA's random split; re-train
+before evaluating it.
+
+## 3b. Efficiency, purity, and STAR's categorization beside it
+
+TMVA's summary table ("best signal efficiency times signal purity") tunes a
+separate set of cuts for each class and reports one product per class. It is fine
+for comparing feature sets, but it is not what the makers deliver, and it hides
+efficiency and purity inside one number. `evalCategory.C` gives each cluster the
+class with the **highest score** — the rule `StFcsMLCategoryMaker` and
+`StFcsPicoCategoryMaker` apply — and measures the result on the held-out half:
+
+```csh
+root4star -b -q 'evalCategory.C+("feat_pico_all.root","weights/FcsCat13_BDTG.weights.xml",13)' >& eval13.log
+root4star -b -q 'evalCategory.C+("feat_pico_all.root","weights/FcsCat3_BDTG.weights.xml",3)'   >& eval3.log
+```
+
+Arguments after the feature set: method (`"BDTG"` or `"MLP"`), sample
+(`1` test half — default, `0` training half, `2` everything), output name, `eMin`.
+Running `sample=0` next to `sample=1` is the overtraining check: a large gap
+between the two means the model has memorised its training clusters.
+
+It prints, for the model and for `catStar` on the same clusters:
+
+- the **confusion matrix** — rows are the true class, columns what was
+  assigned, each row as a fraction of its true class;
+- per class, **efficiency** (of the true class-k clusters, the fraction called k)
+  and **purity** (of the clusters called k, the fraction truly k), with errors;
+- a **balanced purity**, as if the three classes were equally common.
+
+Efficiency does not depend on the class mix; purity does. In a single-particle
+sample the mix is whatever number of γ, π⁰ and π⁻ events you simulated, so quote
+purity only together with the mix — which the macro prints — or use the balanced
+one.
+
+`evalFcsCat<set>_<method>.pdf` has four pages: the confusion matrices; efficiency
+and purity against cluster energy (model filled, STAR open markers); two-photon
+efficiency against the separation of the two photons in towers — the merged-π⁰
+transition, and the plot that shows most directly what the model adds; and the
+model's three score distributions for each true class. Every histogram behind them
+is in the matching `.root` file.
+
+**STAR's category is not the same three classes.** `catStar` 0 means *ambiguous —
+let `StFcsPointMaker` try both fits*, not hadron; STAR has no hadron class. So the
+comparison is for one- and two-photon clusters only, and STAR's efficiencies count
+only clusters it categorised outright. The fitter resolves its ambiguous ones
+later, using a χ² that picoDst does not keep usefully, so STAR's numbers here are a
+lower bound on what the full STAR chain achieves.
 
 ## 4. Apply
 
