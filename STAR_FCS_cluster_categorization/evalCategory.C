@@ -9,9 +9,13 @@
 // Output
 //   printed : confusion matrix, and per class the efficiency and purity with
 //             binomial errors, for the model and for STAR's catStar
-//   <out>.pdf  : four pages - confusion matrices; efficiency and purity vs
-//                cluster energy; two-photon efficiency vs photon separation;
-//                the model's score distributions per true class
+//   <out>.pdf  : confusion matrices; efficiency and purity vs cluster energy;
+//                two-photon efficiency vs photon separation; the model's score
+//                distributions per true class; and, if the feature file has the
+//                genPid branch, the PER-PARTICLE view: what the clusters of the
+//                gamma / pi0 / pi- samples really are, what the model and the
+//                FCS Cluster category call them, and every input feature drawn
+//                separately for each particle
 //   <out>.root : every histogram and TEfficiency behind the pages
 //
 // WHAT THE NUMBERS ARE - read this before quoting one
@@ -53,6 +57,7 @@
 //
 // author: generated for Xilin Liang
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -84,6 +89,20 @@ const char* kStarName[3] = {"0 ambiguous", "1 onePhoton", "2 twoPhoton"};
 // labelled on every figure. Change it here and all four pages follow.
 const char* kRefName = "FCS Cluster";
 const int kClsColor[3] = {kGray + 2, kAzure + 1, kOrange + 7};
+
+// The generated (gun) particle of an event, grouped. GEANT3 pids: 1 gamma,
+// 7 pi0, 9 pi-; anything else generated goes to "other gun". pid 0 = no MC.
+const int kNPart = 4;
+const char* kPartTxt[kNPart] = {"gamma", "pi0", "pi-", "other gun"};
+const char* kPartRoot[kNPart] = {"#gamma", "#pi^{0}", "#pi^{-}", "other gun"};
+const int kPartColor[kNPart] = {kGreen + 2, kRed + 1, kBlack, kMagenta + 1};
+int partSlot(int pid) {
+   if (pid == 1) return 0;
+   if (pid == 7) return 1;
+   if (pid == 9) return 2;
+   if (pid > 0) return 3;
+   return -1;
+}
 
 // binomial error on a fraction pass/total
 double binomErr(double pass, double total) {
@@ -225,6 +244,15 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    if (in->GetBranch("mcLabel")) in->SetBranchAddress("mcLabel", &mcLabel);
    const bool haveSep = (in->GetBranch("mcSepCell") != 0);
    if (haveSep) in->SetBranchAddress("mcSepCell", &mcSepCell);
+   // which sample each cluster came from - written by the dumpers since the
+   // per-particle view was added; older feature files do not have it
+   Int_t genPid = 0;
+   Float_t genE = 0;
+   const bool haveGen = (in->GetBranch("genPid") != 0);
+   if (haveGen) {
+      in->SetBranchAddress("genPid", &genPid);
+      if (in->GetBranch("genE")) in->SetBranchAddress("genE", &genE);
+   }
 
    // ------------------------------------------------------------ histograms
    const int nEB = 10;
@@ -258,6 +286,25 @@ void evalCategory(const char* infile = "feat_pico_all.root",
          hScore[k][t]->SetLineColor(kClsColor[t]);
          hScore[k][t]->SetLineWidth(2);
       }
+
+   // per generated particle: what the clusters truly are, and what each method
+   // calls them. [particle][class]
+   // partCnt[0] = true class, [1] = model, [2] = FCS Cluster category
+   double partCnt[3][kNPart][3];
+   double partClus[kNPart], partEvt[kNPart], partGenE[kNPart];
+   long partLastEvt[kNPart];
+   for (int p = 0; p < kNPart; p++) {
+      partClus[p] = partEvt[p] = partGenE[p] = 0;
+      partLastEvt[p] = -1;
+      for (int m = 0; m < 3; m++)
+         for (int k = 0; k < 3; k++) partCnt[m][p][k] = 0;
+   }
+   int otherPids[8];
+   int nOtherPids = 0;
+   // the input features of every evaluated cluster, kept so each can be drawn
+   // per particle once its range is known
+   std::vector<float> featVal[kNVarMax];
+   std::vector<int> featPart;
 
    // ------------------------------------------------------------ event loop
    Confusion ml, st;
@@ -339,6 +386,29 @@ void evalCategory(const char* infile = "feat_pico_all.root",
          effSep_ml->Fill(pred == 2, mcSepCell);
          effSep_st->Fill(star == 2, mcSepCell);
       }
+
+      // ---- per generated particle ----
+      const int ps = haveGen ? partSlot(genPid) : -1;
+      if (ps >= 0) {
+         partClus[ps] += 1;
+         partCnt[0][ps][truth] += 1;
+         partCnt[1][ps][pred] += 1;
+         partCnt[2][ps][star] += 1;
+         const long evt = splitter.nEvents() - 1;  // ordinal of the current event
+         if (evt != partLastEvt[ps]) {
+            partLastEvt[ps] = evt;
+            partEvt[ps] += 1;
+            partGenE[ps] += genE;
+         }
+         if (ps == 3) {
+            bool seen = false;
+            for (int q = 0; q < nOtherPids; q++)
+               if (otherPids[q] == genPid) seen = true;
+            if (!seen && nOtherPids < 8) otherPids[nOtherPids++] = genPid;
+         }
+         for (int v = 0; v < NVAR; v++) featVal[v].push_back(var[v]);
+         featPart.push_back(ps);
+      }
    }
 
    // ----------------------------------------------------------------- print
@@ -372,6 +442,48 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    printf("\n  class mix of this sample: other %.1f%%  onePhoton %.1f%%  twoPhoton %.1f%%\n",
           100.0 * ml.rowSum(0) / nUsed, 100.0 * ml.rowSum(1) / nUsed, 100.0 * ml.rowSum(2) / nUsed);
    printf("  purity depends on that mix; efficiency and purity(balanced) do not\n");
+
+   // ---- per generated particle ----
+   int nPartUsed = 0;
+   for (int p = 0; p < kNPart; p++)
+      if (partClus[p] > 0) nPartUsed++;
+   if (!haveGen) {
+      printf("\n  (no genPid branch in %s: re-dump it with the current feature maker to get\n"
+             "   the per-particle summary - which sample each cluster came from)\n", infile);
+   } else if (nPartUsed > 0) {
+      printf("\n=== per generated particle - the gun particle of each event ===\n");
+      printf("  %-10s %9s %8s %12s\n", "particle", "clusters", "events", "<E_gen> GeV");
+      for (int p = 0; p < kNPart; p++) {
+         if (partClus[p] <= 0) continue;
+         printf("  %-10s %9.0f %8.0f %12.2f\n", kPartTxt[p], partClus[p], partEvt[p],
+                partEvt[p] > 0 ? partGenE[p] / partEvt[p] : 0.0);
+      }
+      if (nOtherPids > 0) {
+         printf("  (\"other gun\" GEANT pids:");
+         for (int q = 0; q < nOtherPids; q++) printf(" %d", otherPids[q]);
+         printf(")\n");
+      }
+      const char* tblTitle[3] = {"what the clusters TRULY are (photons inside each cluster)",
+                                 "", ""};
+      TString t1 = TString::Format("what %s CALLS them", method);
+      TString t2 = TString::Format("what the %s category calls them", kRefName);
+      tblTitle[1] = t1.Data();
+      tblTitle[2] = t2.Data();
+      for (int m = 0; m < 3; m++) {
+         printf("\n  %s - fraction of that particle's clusters\n", tblTitle[m]);
+         printf("  %-10s", "");
+         for (int k = 0; k < 3; k++) printf(" %13s", m == 2 ? kStarName[k] : kClsName[k]);
+         printf("\n");
+         for (int p = 0; p < kNPart; p++) {
+            if (partClus[p] <= 0) continue;
+            printf("  %-10s", kPartTxt[p]);
+            for (int k = 0; k < 3; k++) printf(" %13.3f", partCnt[m][p][k] / partClus[p]);
+            printf("\n");
+         }
+      }
+      printf("\n  Read the pi0 row of the first table as: a pi0 whose photons are resolved\n"
+             "  makes two ONE-photon clusters; only a merged pi0 makes a TWO-photon cluster.\n");
+   }
 
    // ----------------------------------------------------------------- plots
    TFile* fout = new TFile(out + ".root", "RECREATE");
@@ -484,7 +596,110 @@ void evalCategory(const char* infile = "feat_pico_all.root",
          ls->Draw();
       }
    }
-   cv->Print(pdf + ")");
+   const bool perParticle = haveGen && nPartUsed > 0;
+   if (perParticle)
+      cv->Print(pdf);
+   else
+      cv->Print(pdf + ")");
+
+   // ---------------------------------------------------- per-particle pages
+   std::vector<TH1*> keep;  // written to the .root file at the end
+   if (perParticle) {
+      // page 5: per particle - what the clusters truly are, and what each method calls them
+      cv->Clear();
+      cv->Divide(3, 1);
+      TString ttl[3] = {"true class (photons in the cluster)", TString::Format("%s (set %d)", method, featureSet),
+                        TString(kRefName)};
+      int rowOf[kNPart];
+      int nRow = 0;
+      for (int p = 0; p < kNPart; p++) rowOf[p] = (partClus[p] > 0) ? nRow++ : -1;
+      for (int m = 0; m < 3; m++) {
+         TH2F* h = new TH2F(Form("hPart_%d", m), Form("%s;;generated particle", ttl[m].Data()), 3, 0, 3,
+                            nRow, 0, nRow);
+         for (int p = 0; p < kNPart; p++) {
+            if (rowOf[p] < 0) continue;
+            for (int k = 0; k < 3; k++) h->SetBinContent(k + 1, rowOf[p] + 1, partCnt[m][p][k] / partClus[p]);
+            h->GetYaxis()->SetBinLabel(rowOf[p] + 1, kPartRoot[p]);
+         }
+         for (int k = 0; k < 3; k++) h->GetXaxis()->SetBinLabel(k + 1, m == 2 ? kStarName[k] : kClsName[k]);
+         h->SetMinimum(0);
+         h->SetMaximum(1);
+         h->SetMarkerSize(1.8);
+         h->GetYaxis()->SetLabelSize(0.07);
+         h->GetXaxis()->SetLabelSize(0.05);
+         cv->cd(m + 1);
+         gPad->SetLeftMargin(0.15);
+         gPad->SetRightMargin(0.14);
+         h->Draw("colz text");
+         keep.push_back(h);
+      }
+      const int nFeatPages = (NVAR + 7) / 8;
+      cv->Print(nFeatPages > 0 ? pdf.Data() : (pdf + ")").Data());
+
+      // pages 6+: every input feature, one histogram per particle, unit area
+      const int nClu = (int)featPart.size();
+      for (int pg = 0; pg < nFeatPages; pg++) {
+         cv->Clear();
+         cv->Divide(4, 2);
+         for (int j = 0; j < 8; j++) {
+            const int v = pg * 8 + j;
+            if (v >= NVAR) break;
+            // range from the 0.5 - 99.5 % quantiles, so one outlier cannot
+            // squeeze the whole distribution into a single bin
+            std::vector<float> sorted(featVal[v]);
+            std::sort(sorted.begin(), sorted.end());
+            double lo = sorted.empty() ? 0 : sorted[(size_t)(0.005 * (sorted.size() - 1))];
+            double hi = sorted.empty() ? 1 : sorted[(size_t)(0.995 * (sorted.size() - 1))];
+            if (hi <= lo) hi = lo + 1;
+            const double pad = 0.03 * (hi - lo);
+            lo -= pad;
+            hi += pad;
+            TH1F* hv[kNPart];
+            double ymax = 0;
+            for (int p = 0; p < kNPart; p++) {
+               hv[p] = 0;
+               if (partClus[p] <= 0) continue;
+               hv[p] = new TH1F(Form("hFeat_%s_%d", names[v], p), Form("%s;%s;fraction of clusters", names[v], names[v]),
+                                50, lo, hi);
+               hv[p]->SetLineColor(kPartColor[p]);
+               hv[p]->SetLineWidth(2);
+               keep.push_back(hv[p]);
+            }
+            for (int c = 0; c < nClu; c++) {
+               TH1F* h = hv[featPart[c]];
+               if (h) h->Fill(featVal[v][c]);
+            }
+            for (int p = 0; p < kNPart; p++) {
+               if (!hv[p]) continue;
+               const double sum = hv[p]->Integral();
+               if (sum > 0) hv[p]->Scale(1.0 / sum);
+               if (hv[p]->GetMaximum() > ymax) ymax = hv[p]->GetMaximum();
+            }
+            cv->cd(j + 1);
+            bool first = true;
+            for (int p = 0; p < kNPart; p++) {
+               if (!hv[p]) continue;
+               hv[p]->SetMaximum(ymax * 1.25);
+               hv[p]->SetMinimum(0);
+               hv[p]->Draw(first ? "hist" : "hist same");
+               first = false;
+            }
+            if (j == 0) {
+               TLegend* lp = new TLegend(0.55, 0.62, 0.93, 0.89);
+               lp->SetBorderSize(0);
+               lp->SetFillStyle(0);
+               for (int p = 0; p < kNPart; p++)
+                  if (hv[p]) lp->AddEntry(hv[p], kPartRoot[p], "l");
+               lp->Draw();
+            }
+         }
+         const bool last = (pg == nFeatPages - 1);
+         if (last)
+            cv->Print(pdf + ")");
+         else
+            cv->Print(pdf);
+      }
+   }
 
    // everything behind the plots
    fout->cd();
@@ -499,6 +714,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    }
    effSep_ml->Write();
    effSep_st->Write();
+   for (size_t i = 0; i < keep.size(); i++) keep[i]->Write();
    fout->Close();
    printf("\nwrote %s and %s.root\n", pdf.Data(), out.Data());
 }

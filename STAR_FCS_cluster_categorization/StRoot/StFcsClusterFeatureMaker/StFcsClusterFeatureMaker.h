@@ -67,6 +67,8 @@ class StFcsClusterFeatureMaker : public StMaker {
    void clearMcPhotons();
    void addMcPhoton(int id, int parent, int parentPid, float e,
                     float px, float py, float pz, float vx, float vy, float vz);
+   // the generated (gun) particle of the event, see bGenPid below
+   void setGenerated(int pid, float e, int nPrimaries);
 
   private:
    void resetBranches();
@@ -131,6 +133,15 @@ class StFcsClusterFeatureMaker : public StMaker {
    Float_t bMcSepCell;      // the same in tower units - the merge-transition variable
    Float_t bMcZgg;          // |E1-E2|/(E1+E2) of the two leading matched photons, -1 if <2
    Int_t bNMcPhotonEvent;   // generated photons in the event reaching either ECal half
+
+   // The GENERATED particle of the event - for a single-particle gun, the gun
+   // particle itself; same value on every cluster of an event. It records which
+   // sample a cluster came from, which is otherwise lost once the gamma, pi0 and
+   // pi- files are hadd-ed together, and evalCategory.C summarises the model
+   // per particle with it. It is NOT the training label (that is mcLabel).
+   Int_t bGenPid;           // GEANT3 pid: 1 gamma, 7 pi0, 8 pi+, 9 pi-, 3 e-, ...; 0 = no MC
+   Float_t bGenE;           // its generated energy [GeV]
+   Int_t bNGen;             // primaries at the first vertex; 1 for a single-particle gun
 
    int mSaveMcTruth = 1;
    float mMcMatchR = 11.0;  // cm, about two ECal towers

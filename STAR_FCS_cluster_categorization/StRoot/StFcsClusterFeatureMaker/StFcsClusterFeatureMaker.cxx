@@ -124,6 +124,9 @@ Int_t StFcsClusterFeatureMaker::Init() {
    mTree->Branch("mcSepCell", &bMcSepCell, "mcSepCell/F");
    mTree->Branch("mcZgg", &bMcZgg, "mcZgg/F");
    mTree->Branch("nMcPhotonEvent", &bNMcPhotonEvent, "nMcPhotonEvent/I");
+   mTree->Branch("genPid", &bGenPid, "genPid/I");
+   mTree->Branch("genE", &bGenE, "genE/F");
+   mTree->Branch("nGen", &bNGen, "nGen/I");
 
    return kStOK;
 }
@@ -211,6 +214,16 @@ void StFcsClusterFeatureMaker::projectPhoton(McPhoton& ph) {
 void StFcsClusterFeatureMaker::clearMcPhotons() {
    mMcPhotons.clear();
    bNMcPhotonEvent = 0;
+   bGenPid = 0;
+   bGenE = 0;
+   bNGen = 0;
+   mMcExternal = 1;
+}
+
+void StFcsClusterFeatureMaker::setGenerated(int pid, float e, int nPrimaries) {
+   bGenPid = pid;
+   bGenE = e;
+   bNGen = nPrimaries;
    mMcExternal = 1;
 }
 
@@ -245,6 +258,9 @@ void StFcsClusterFeatureMaker::collectMcPhotons() {
    }
    mMcPhotons.clear();
    bNMcPhotonEvent = 0;
+   bGenPid = 0;
+   bGenE = 0;
+   bNGen = 0;
    mHaveMc = 0;
    if (!mSaveMcTruth) return;
 
@@ -260,6 +276,29 @@ void StFcsClusterFeatureMaker::collectMcPhotons() {
    const int ntrk = trkTable->GetNRows();
    const int nvtx = vtxTable->GetNRows();
    if (!trk || !vtx) return;
+
+   // The generated (gun) particle: GEANT numbers the generator's particles
+   // first, so track id 1 is one of them, and the primaries are the tracks
+   // starting at its vertex. One for a single-particle gun; with several, the
+   // most energetic is recorded. Same rule as StFcsPicoFeatureMaker and
+   // StFcsMuMcTruthMaker, so all three tiers fill genPid identically.
+   {
+      int i1 = 0;
+      for (int i = 0; i < ntrk; i++)
+         if (trk[i].id == 1) {
+            i1 = i;
+            break;
+         }
+      const int v1 = trk[i1].start_vertex_p;
+      for (int i = 0; i < ntrk; i++) {
+         if (trk[i].start_vertex_p != v1) continue;
+         bNGen++;
+         if (trk[i].e > bGenE) {
+            bGenE = trk[i].e;
+            bGenPid = trk[i].ge_pid;
+         }
+      }
+   }
 
    for (int i = 0; i < ntrk; i++) {
       if (trk[i].ge_pid != 1) continue;   // GEANT3 pid 1 = gamma

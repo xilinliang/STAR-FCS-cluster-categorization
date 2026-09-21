@@ -376,6 +376,23 @@ transition, and the plot that shows most directly what the model adds; and the
 model's three score distributions for each true class. Every histogram behind them
 is in the matching `.root` file.
 
+**Per generated particle.** Every feature file now carries `genPid`, `genE` and
+`nGen`: the GEANT id and energy of the generated (gun) particle of the event — for
+a single-particle sample, which sample the cluster came from. That is lost
+otherwise once the γ, π⁰ and π⁻ files are `hadd`-ed together. `genPid` is **not**
+the training label: the label stays `mcLabel`, the number of photons inside the
+cluster, because a resolved π⁰ photon is physically the same object as a gun
+photon and no feature can tell them apart. With `genPid` present,
+`evalCategory.C` adds, per particle (γ / π⁰ / π⁻):
+
+- what its clusters truly are, what the model calls them, and what the FCS Cluster
+  category calls them — printed, and as page 5 of the PDF;
+- every input feature of the chosen set drawn separately for each particle, on the
+  pages after it, so the characteristics the model learns from are visible directly.
+
+Feature files dumped before this change have no `genPid`; the macro says so and
+skips those pages. Re-dump to get them — training is unaffected.
+
 **STAR's category is not the same three classes.** `catStar` 0 means *ambiguous —
 let `StFcsPointMaker` try both fits*, not hadron; STAR has no hadron class. So the
 comparison is for one- and two-photon clusters only, and STAR's efficiencies count

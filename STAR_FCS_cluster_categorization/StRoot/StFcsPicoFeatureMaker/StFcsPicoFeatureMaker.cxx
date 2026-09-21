@@ -163,6 +163,9 @@ Int_t StFcsPicoFeatureMaker::Init() {
    mTree->Branch("mcSepCell", &bMcSepCell, "mcSepCell/F");
    mTree->Branch("mcZgg", &bMcZgg, "mcZgg/F");
    mTree->Branch("nMcPhotonEvent", &bNMcPhotonEvent, "nMcPhotonEvent/I");
+   mTree->Branch("genPid", &bGenPid, "genPid/I");
+   mTree->Branch("genE", &bGenE, "genE/F");
+   mTree->Branch("nGen", &bNGen, "nGen/I");
 
    // picoDst-only QA of the association
    mTree->Branch("vz", &bVz, "vz/F");
@@ -266,6 +269,46 @@ void StFcsPicoFeatureMaker::projectPhoton(McPhoton& ph) {
 //
 // StPicoMcTrack has no parent pointer, only the id of its start vertex, so the
 // parent is found the same way: the track that ENDS at that vertex.
+// The generated ("gun") particle of the event.
+//
+// GEANT numbers the generator's particles first, so track id 1 is always one
+// of them, and the primaries are the tracks that start at the same vertex as
+// track 1. In a single-particle gun there is exactly one - checked on
+// pi0.e30.vz0.run6: all 100 events have one primary, the pi0 (GEANT pid 7),
+// at vertex 1, with its two photons starting at vertex 2. If there are several
+// primaries (a multi-particle generator), the most energetic one is recorded
+// and nGen says how many there were.
+void StFcsPicoFeatureMaker::fillGenerated() {
+   bGenPid = 0;
+   bGenE = 0;
+   bNGen = 0;
+   const int ntrk = (int)mPicoDst->numberOfMcTracks();
+   if (ntrk <= 0) return;
+
+   StPicoMcTrack* first = 0;
+   for (int i = 0; i < ntrk; i++) {
+      StPicoMcTrack* t = mPicoDst->mcTrack(i);
+      if (t && t->id() == 1) {
+         first = t;
+         break;
+      }
+   }
+   if (!first) first = mPicoDst->mcTrack(0);
+   if (!first) return;
+
+   const int vtx0 = first->idVtxStart();
+   for (int i = 0; i < ntrk; i++) {
+      StPicoMcTrack* t = mPicoDst->mcTrack(i);
+      if (!t || t->idVtxStart() != vtx0) continue;
+      bNGen++;
+      if (t->energy() > bGenE) {
+         bGenE = t->energy();
+         bGenPid = t->geantId();
+      }
+   }
+}
+
+//-----------------------------------------------------------------------------
 void StFcsPicoFeatureMaker::collectMcPhotons() {
    mMcPhotons.clear();
    bNMcPhotonEvent = 0;
@@ -400,6 +443,7 @@ Int_t StFcsPicoFeatureMaker::Make() {
    bVz = ev->primaryVertex().z();
 
    collectMcPhotons();
+   fillGenerated();
 
    const int nHitAll = (int)mPicoDst->numberOfFcsHits();
    const int nCluAll = (int)mPicoDst->numberOfFcsClusters();

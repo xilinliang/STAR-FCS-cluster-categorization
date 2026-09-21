@@ -94,6 +94,7 @@ class StFcsPicoFeatureMaker : public StMaker {
   private:
    void resetBranches();
    void collectMcPhotons();
+   void fillGenerated();  // the gun particle of this event -> genPid, genE, nGen
    void matchMcPhotons(float cluX, float cluY, int det);
 
    StPicoDstMaker* mPicoDstMaker;
@@ -142,6 +143,16 @@ class StFcsPicoFeatureMaker : public StMaker {
    Float_t bMcE[kMaxMc], bMcDr[kMaxMc], bMcX[kMaxMc], bMcY[kMaxMc];
    Float_t bMcSep, bMcSepCell, bMcZgg;
    Int_t bNMcPhotonEvent;
+
+   // The GENERATED particle of the event - for a single-particle gun, the gun
+   // particle itself. Same value on every cluster of an event. It says which
+   // sample a cluster came from, which the tree otherwise forgets once the
+   // gamma, pi0 and pi- files are hadd-ed together; evalCategory.C uses it to
+   // summarise the classifier per particle. It is NOT the training label -
+   // that stays mcLabel, the number of photons inside the cluster.
+   Int_t bGenPid;    // GEANT3 pid: 1 gamma, 7 pi0, 8 pi+, 9 pi-, 3 e-, ...; 0 = no MC
+   Float_t bGenE;    // its generated energy [GeV]
+   Int_t bNGen;      // primaries at the first vertex; 1 for a single-particle gun
 
    // ---- picoDst-only extras, for judging the association ----
    Float_t bVz;

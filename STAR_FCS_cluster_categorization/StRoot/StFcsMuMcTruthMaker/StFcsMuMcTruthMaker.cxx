@@ -89,6 +89,36 @@ Int_t StFcsMuMcTruthMaker::Make() {
    const int ntrk = mcTracks->GetEntriesFast();
    const int nvtx = mcVertices->GetEntriesFast();
 
+   // The generated (gun) particle, by the same rule as the other two tiers:
+   // track id 1 is one of the generator's particles, the primaries are the
+   // tracks sharing its start vertex, and the most energetic one is recorded.
+   {
+      StMuMcTrack* first = 0;
+      for (int i = 0; i < ntrk; i++) {
+         StMuMcTrack* t = (StMuMcTrack*)mcTracks->UncheckedAt(i);
+         if (t && t->Id() == 1) {
+            first = t;
+            break;
+         }
+      }
+      if (!first && ntrk > 0) first = (StMuMcTrack*)mcTracks->UncheckedAt(0);
+      if (first) {
+         const int v1 = first->IdVx();
+         int nPrim = 0, pid = 0;
+         float eMax = 0;
+         for (int i = 0; i < ntrk; i++) {
+            StMuMcTrack* t = (StMuMcTrack*)mcTracks->UncheckedAt(i);
+            if (!t || t->IdVx() != v1) continue;
+            nPrim++;
+            if (t->E() > eMax) {
+               eMax = t->E();
+               pid = t->GePid();
+            }
+         }
+         mFeat->setGenerated(pid, eMax, nPrim);
+      }
+   }
+
    for (int i = 0; i < ntrk; i++) {
       StMuMcTrack* t = (StMuMcTrack*)mcTracks->UncheckedAt(i);
       if (!t) continue;
