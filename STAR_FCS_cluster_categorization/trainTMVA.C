@@ -314,9 +314,22 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
                        "!H:!V:NTrees=600:MaxDepth=4:BoostType=Grad:Shrinkage=0.10:"
                        "UseBaggedBoost:BaggedSampleFraction=0.5:nCuts=40:"
                        "NegWeightTreatment=IgnoreNegWeightsInTraining");
+   // No UseRegulator. TMVA's Bayesian regulator inverts the Hessian of the
+   // network every few epochs, and the feature sets here contain inputs that
+   // are exact functions of other inputs - set 13 has sigmaRatio =
+   // sigmaMin/sigmaMax and e1e2Asym = (e1-e2)/(e1+e2), set 3 has seedFrac equal
+   // to the central tower fraction t11. Each is a direction the Hessian cannot
+   // see, so it is singular and ROOT prints
+   //   Error in <TDecompLU::InvertLU>: matrix is singular, 2 diag elements <
+   //   tolerance of 2.2204e-16
+   // mid-progress-bar. Training carries on without that regulator update, so
+   // the result survives, but the message looks like a failure and the
+   // regulator is not doing its job anyway. Overtraining is watched instead
+   // through the train/test error TMVA prints at the end - they agreed to
+   // 0.087 vs 0.087 on the first real sample.
    factory->BookMethod(TMVA::Types::kMLP, "MLP",
                        "!H:!V:NeuronType=tanh:NCycles=600:HiddenLayers=N+5,N:"
-                       "TestRate=5:EstimatorType=CE:UseRegulator:VarTransform=Norm");
+                       "TestRate=5:EstimatorType=CE:VarTransform=Norm");
 
    factory->TrainAllMethods();
    factory->TestAllMethods();
