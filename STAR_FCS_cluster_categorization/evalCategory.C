@@ -80,6 +80,9 @@ namespace {
 
 const char* kClsName[3] = {"other", "onePhoton", "twoPhoton"};
 const char* kStarName[3] = {"0 ambiguous", "1 onePhoton", "2 twoPhoton"};
+// How STAR's own category (the catStar branch, set by StFcsClusterMaker) is
+// labelled on every figure. Change it here and all four pages follow.
+const char* kRefName = "FCS Cluster";
 const int kClsColor[3] = {kGray + 2, kAzure + 1, kOrange + 7};
 
 // binomial error on a fraction pass/total
@@ -236,14 +239,14 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       purE_ml[k] = makeEff(Form("purE_ml_%s", kClsName[k]),
                            Form("model purity, %s;cluster E [GeV];purity", kClsName[k]), nEB, eBins);
       effE_st[k] = makeEff(Form("effE_star_%s", kClsName[k]),
-                           Form("STAR efficiency, %s;cluster E [GeV];efficiency", kClsName[k]), nEB, eBins);
+                           Form("%s efficiency, %s;cluster E [GeV];efficiency", kRefName, kClsName[k]), nEB, eBins);
       purE_st[k] = makeEff(Form("purE_star_%s", kClsName[k]),
-                           Form("STAR purity, %s;cluster E [GeV];purity", kClsName[k]), nEB, eBins);
+                           Form("%s purity, %s;cluster E [GeV];purity", kRefName, kClsName[k]), nEB, eBins);
    }
    TEfficiency* effSep_ml = makeEff("effSep_ml", "two-photon efficiency vs separation, model;"
                                     "photon separation [towers];efficiency", nSB, sBins);
-   TEfficiency* effSep_st = makeEff("effSep_star", "two-photon efficiency vs separation, STAR;"
-                                    "photon separation [towers];efficiency", nSB, sBins);
+   TEfficiency* effSep_st = makeEff("effSep_star", Form("two-photon efficiency vs separation, %s;"
+                                    "photon separation [towers];efficiency", kRefName), nSB, sBins);
 
    // model score k, split by true class
    TH1F* hScore[3][3];
@@ -357,7 +360,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
              binomErr(ml.c[k][k], ml.rowSum(k)), ml.pur(k), binomErr(ml.c[k][k], ml.colSum(k)),
              ml.purBalanced(k));
 
-   printMatrix(st, "--- STAR catStar on the same clusters ---", kStarName);
+   printMatrix(st, Form("--- %s category (catStar branch) on the same clusters ---", kRefName), kStarName);
    printf("\n  %-11s %17s %17s %17s\n", "class", "efficiency", "purity", "purity(balanced)");
    for (int k = 1; k < 3; k++)
       printf("  %-11s    %.3f +- %.3f    %.3f +- %.3f    %.3f\n", kClsName[k], st.eff(k),
@@ -380,7 +383,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    const Confusion* mats[2] = {&ml, &st};
    // TString, not Form(): Form() writes into a circular buffer that later
    // Form() calls overwrite, so its result must not be kept around
-   const TString matTitle[2] = {TString::Format("%s (set %d)", method, featureSet), "STAR catStar"};
+   const TString matTitle[2] = {TString::Format("%s (set %d)", method, featureSet), kRefName};
    cv->Divide(2, 1);
    for (int m = 0; m < 2; m++) {
       hConf[m] = new TH2F(Form("hConf_%d", m),
@@ -410,19 +413,29 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    const char* ytitle[2] = {"efficiency", "purity"};
    for (int p = 0; p < 2; p++) {
       cv->cd(p + 1);
+      // The legend lives in a band ABOVE the frame, not inside it: these
+      // points cover the whole 0-1 range somewhere across the energy axis, so
+      // no corner of the frame is reliably empty. The frame title would sit in
+      // that band too, so the y-axis title names the panel instead.
+      gPad->SetTopMargin(0.26);
       gPad->SetGridy();
       TH1F* fr = gPad->DrawFrame(eBins[0], 0, eBins[nEB], 1.05,
-                                 Form("%s vs energy;cluster E [GeV];%s", ytitle[p], ytitle[p]));
+                                 Form(";cluster E [GeV];%s", ytitle[p]));
       (void)fr;
-      leg[p] = new TLegend(0.45, 0.14, 0.88, 0.40);
+      leg[p] = new TLegend(0.10, 0.755, 0.95, 0.985);
       leg[p]->SetBorderSize(0);
       leg[p]->SetFillStyle(0);
+      leg[p]->SetTextSize(0.042);
+      leg[p]->SetNColumns(2);  // left column the model, right column FCS Cluster
       for (int k = 0; k < 3; k++) {
          TGraphAsymmErrors* g = drawEff(effs[p][0][k], kClsColor[k], 20);
-         if (g) leg[p]->AddEntry(g, Form("%s, %s", kClsName[k], method), "lp");
-         if (k == 0) continue;
+         leg[p]->AddEntry(g, Form("%s, %s", kClsName[k], method), "lp");
+         if (k == 0) {
+            leg[p]->AddEntry((TObject*)0, "", "");  // FCS Cluster has no "other" class
+            continue;
+         }
          TGraphAsymmErrors* s = drawEff(effs[p][1][k], kClsColor[k], 24);
-         if (s) leg[p]->AddEntry(s, Form("%s, STAR", kClsName[k]), "lp");
+         leg[p]->AddEntry(s, Form("%s, %s", kClsName[k], kRefName), "lp");
       }
       leg[p]->Draw();
    }
@@ -441,7 +454,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    TGraphAsymmErrors* gs1 = drawEff(effSep_ml, kClsColor[2], 20);
    TGraphAsymmErrors* gs2 = drawEff(effSep_st, kClsColor[2], 24);
    if (gs1) lsep->AddEntry(gs1, method, "lp");
-   if (gs2) lsep->AddEntry(gs2, "STAR catStar == 2", "lp");
+   if (gs2) lsep->AddEntry(gs2, Form("%s (category 2)", kRefName), "lp");
    lsep->Draw();
    if (!haveSep) printf("  (no mcSepCell branch in %s - page 3 is empty)\n", infile);
    cv->Print(pdf);
