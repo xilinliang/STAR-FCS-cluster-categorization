@@ -446,7 +446,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    cv->cd();
    gPad->SetGridy();
    gPad->DrawFrame(sBins[0], 0, sBins[nSB], 1.05,
-                   "true two-photon clusters called two-photon;"
+                   "Merged #pi^{0} clusters: fraction identified as two-photon;"
                    "separation of the two photons at the ECal [towers];efficiency");
    TLegend* lsep = new TLegend(0.55, 0.15, 0.88, 0.32);
    lsep->SetBorderSize(0);
