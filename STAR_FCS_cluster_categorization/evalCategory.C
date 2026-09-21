@@ -163,6 +163,9 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    gROOT->SetBatch(kTRUE);
    gStyle->SetOptStat(0);
    gStyle->SetPaintTextFormat("4.2f");
+   // PDF page in the canvas's own 2.2:1 shape. The default paper is 20x26 cm
+   // portrait, which leaves a wide canvas squeezed into one corner of the page.
+   gStyle->SetPaperSize(28.0, 12.7);
 
    const TString out = strlen(outName) ? TString(outName) : Form("evalFcsCat%d_%s", featureSet, method);
    const char* sampleName[3] = {"TRAINING half", "TEST half (held out)", "ALL clusters"};
