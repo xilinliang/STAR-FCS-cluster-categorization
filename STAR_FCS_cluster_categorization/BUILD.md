@@ -369,12 +369,36 @@ sample the mix is whatever number of γ, π⁰ and π⁻ events you simulated, s
 purity only together with the mix — which the macro prints — or use the balanced
 one.
 
-`evalFcsCat<set>_<method>.pdf` has four pages: the confusion matrices; efficiency
+`evalFcsCat<set>_<method>.pdf` pages: the confusion matrices; the **ePIC-style
+figure** (below) for the model and for the FCS Cluster category; efficiency
 and purity against cluster energy (model filled, STAR open markers); two-photon
 efficiency against the separation of the two photons in towers — the merged-π⁰
 transition, and the plot that shows most directly what the model adds; and the
 model's three score distributions for each true class. Every histogram behind them
 is in the matching `.root` file.
+
+**The ePIC-style figure (pages 2 and 3).** Three panels — *Single EM*,
+*Hadronic*, *Merged π⁰* — each with efficiency (red) and purity (blue) against
+energy, the layout of the ePIC cluster-categorization study; page 2 is the model,
+page 3 the FCS Cluster category (whose Hadronic panel is empty: it has no hadron
+class). Single EM = class onePhoton, Hadronic = other, Merged π⁰ = twoPhoton. Two
+extra arguments, after `treename`, set what "true" means and what the x axis is:
+
+| `truthDef` | a cluster is truly Single EM / Hadronic / Merged π⁰ when … |
+|---|---|
+| `0` (default) | it holds 1 photon / no photon / 2 photons (`mcLabel`) — what the model is trained on |
+| `1` | γ-gun cluster holding the photon / any π⁻ cluster / π⁰-gun cluster holding both photons; gun fragments and resolved π⁰ photons are dropped |
+| `2` | it comes from a γ / π⁻ / π⁰ event, whatever it contains — pure sample identity, as in a single-particle study; resolved π⁰s then count against Merged π⁰ |
+
+`energyAxis = 1` plots against the generated (gun) energy instead of the cluster
+energy. Both need `genPid`/`genE`. The closest match to the ePIC figure:
+
+```csh
+root4star -b -q 'evalCategory.C+("feat_pico_all.root","weights/FcsCat13_BDTG.weights.xml",13,"BDTG",1,"",0.5,0.8,"clusters",1,1)'
+```
+
+`truthDef` applies to every page, confusion matrices included. The energy axis
+runs 0–32 GeV in 2 GeV bins (the FCS guns stop at 30 GeV).
 
 **Per generated particle.** Every feature file now carries `genPid`, `genE` and
 `nGen`: the GEANT id and energy of the generated (gun) particle of the event — for
@@ -386,7 +410,7 @@ photon and no feature can tell them apart. With `genPid` present,
 `evalCategory.C` adds, per particle (γ / π⁰ / π⁻):
 
 - what its clusters truly are, what the model calls them, and what the FCS Cluster
-  category calls them — printed, and as page 5 of the PDF;
+  category calls them — printed, and as page 7 of the PDF;
 - every input feature of the chosen set drawn separately for each particle, on the
   pages after it, so the characteristics the model learns from are visible directly.
 
