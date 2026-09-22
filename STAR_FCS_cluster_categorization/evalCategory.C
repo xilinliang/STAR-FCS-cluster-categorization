@@ -38,6 +38,15 @@
 // single-particle study usually plots:
 //   root4star -b -q 'evalCategory.C+("feat_pico_all.root","weights/FcsCat13_BDTG.weights.xml",13,"BDTG",1,"",0.5,0.8,"clusters",1,1)'
 // truthDef changes the truth used on EVERY page, confusion matrices included.
+// Use truthDef = 1 with a model trained with trainTMVA.C labelDef = 1: then
+// the evaluation truth is exactly the training label.
+//
+// THE ePIC-STYLE SCORE PAGE (page 6, needs genPid). P(Single EM), P(Hadronic)
+// and P(Merged pi0) - the model's three scores - each drawn for four input
+// categories (StFcsTrainTestSplit::inputCategory): gamma input, pi0 2-cluster
+// input (one photon of a resolved pi0), pi0 1-cluster input (both photons in
+// one cluster) and pi- input, unit area, log scale. Clusters of the pi0
+// 2-cluster input are scored here even when truthDef = 1 gives them no class.
 //
 // WHAT THE NUMBERS ARE - read this before quoting one
 //
@@ -126,6 +135,12 @@ int partSlot(int pid) {
    if (pid > 0) return 3;
    return -1;
 }
+
+// ePIC-style input categories (StFcsTrainTestSplit::inputCategory)
+const int kNIn = 4;
+const char* kInRoot[kNIn] = {"#gamma input", "#pi^{0} 2-cluster input", "#pi^{0} 1-cluster input", "#pi^{-} input"};
+const char* kInTxt[kNIn] = {"gamma", "pi0_2cluster", "pi0_1cluster", "pim"};
+const int kInColor[kNIn] = {kBlack, kGreen + 2, kRed, kBlue};
 
 // binomial error on a fraction pass/total
 double binomErr(double pass, double total) {
@@ -336,6 +351,15 @@ void evalCategory(const char* infile = "feat_pico_all.root",
          hScore[k][t]->SetLineWidth(2);
       }
 
+   // ePIC-style: each score, split by input category. [score][input]
+   TH1F* hIn[3][kNIn];
+   for (int k = 0; k < 3; k++)
+      for (int q = 0; q < kNIn; q++) {
+         hIn[k][q] = new TH1F(Form("hIn_score%d_%s", k, kInTxt[q]), ";Probability;Normalized Counts", 100, 0, 1);
+         hIn[k][q]->SetLineColor(kInColor[q]);
+         hIn[k][q]->SetLineWidth(2);
+      }
+
    // per generated particle: what the clusters truly are, and what each method
    // calls them. [particle][class]
    // partCnt[0] = true class, [1] = model, [2] = FCS Cluster category
@@ -373,19 +397,18 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       if (e < eMin) continue;
 
       int truth = StFcsTrainTestSplit::trainingLabel(mcLabel, truthNPhoton, truthPurity, purityCut);
-      if (truthDef > 0) {
-         // the gun particle decides; see the header for 1 (cleaned) vs 2 (raw)
+      if (truthDef == 1) {
+         // the gun particle decides, cleaned - the same rule as trainTMVA.C labelDef=1
+         truth = (truth >= 0) ? StFcsTrainTestSplit::sampleLabel(genPid, mcLabel) : -1;
+      } else if (truthDef == 2) {
+         // the gun particle decides, raw: every cluster of the event
          const int gs = partSlot(genPid);  // 0 gamma, 1 pi0, 2 pi-
-         if (gs == 0)
-            truth = (truthDef == 2 || truth == 1) ? 1 : -1;
-         else if (gs == 1)
-            truth = (truthDef == 2 || truth == 2) ? 2 : -1;
-         else if (gs == 2)
-            truth = 0;
-         else
-            truth = -1;
+         truth = (gs == 0) ? 1 : (gs == 1) ? 2 : (gs == 2) ? 0 : -1;
       }
-      if (truth < 0) {
+      // ePIC-style input category, for the score page; a resolved pi0 photon
+      // has one even when truthDef=1 leaves it without a truth class
+      const int icat = haveGen ? StFcsTrainTestSplit::inputCategory(genPid, mcLabel) : -1;
+      if (truth < 0 && icat < 0) {
          nNoLabel++;
          continue;
       }
@@ -431,6 +454,12 @@ void evalCategory(const char* infile = "feat_pico_all.root",
          if (r[k] > r[pred]) pred = k;
       const int star = (catStar >= 0 && catStar <= 2) ? catStar : 0;
 
+      if (icat >= 0)
+         for (int k = 0; k < 3; k++) hIn[k][icat]->Fill(r[k]);
+      if (truth < 0) {  // scored for the input-category page only
+         nNoLabel++;
+         continue;
+      }
       nUsed++;
       ml.c[truth][pred] += 1;
       st.c[truth][star] += 1;
@@ -704,7 +733,53 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    if (!haveSep) printf("  (no mcSepCell branch in %s - page 5 is empty)\n", infile);
    cv->Print(pdf);
 
-   // page 6: score distributions per true class
+   // page 6: ePIC-style score distributions, split by input category
+   if (haveGen) {
+      cv->Clear();
+      cv->Divide(3, 1);
+      const int panelCls[3] = {1, 0, 2};  // P(Single EM), P(Hadronic), P(Merged pi0)
+      const char* panelName[3] = {"P(Single EM)", "P(Hadronic)", "P(Merged #pi^{0})"};
+      TLatex tx;
+      tx.SetNDC();
+      for (int j = 0; j < 3; j++) {
+         const int k = panelCls[j];
+         cv->cd(j + 1);
+         gPad->SetLogy();
+         gPad->SetTopMargin(0.30);  // title and legend above the frame
+         gPad->SetLeftMargin(0.14);
+         gPad->SetRightMargin(0.04);
+         double ymax = 0, ymin = 1;
+         int nDrawn = 0;
+         for (int q = 0; q < kNIn; q++) {
+            const double sum = hIn[k][q]->Integral();
+            if (sum <= 0) continue;
+            hIn[k][q]->Scale(1.0 / sum);
+            if (hIn[k][q]->GetMaximum() > ymax) ymax = hIn[k][q]->GetMaximum();
+            ymin = std::min(ymin, 0.5 / sum);  // one cluster, normalised
+         }
+         TLegend* li = new TLegend(0.14, 0.715, 0.96, 0.88);
+         li->SetBorderSize(0);
+         li->SetFillStyle(0);
+         li->SetTextSize(0.042);
+         li->SetNColumns(2);
+         for (int q = 0; q < kNIn; q++) {
+            if (hIn[k][q]->Integral() <= 0) continue;
+            hIn[k][q]->SetMaximum(ymax * 2);
+            hIn[k][q]->SetMinimum(ymin);
+            hIn[k][q]->Draw(nDrawn == 0 ? "hist" : "hist same");
+            li->AddEntry(hIn[k][q], kInRoot[q], "l");
+            nDrawn++;
+         }
+         li->Draw();
+         tx.SetTextAlign(22);
+         tx.SetTextFont(42);
+         tx.SetTextSize(0.060);
+         tx.DrawLatexNDC(0.55, 0.94, Form("%s: %s", method, panelName[j]));
+      }
+      cv->Print(pdf);
+   }
+
+   // page 7: score distributions per true class
    cv->Clear();
    cv->Divide(3, 1);
    for (int k = 0; k < 3; k++) {
@@ -738,7 +813,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    // ---------------------------------------------------- per-particle pages
    std::vector<TH1*> keep;  // written to the .root file at the end
    if (perParticle) {
-      // page 7: per particle - what the clusters truly are, and what each method calls them
+      // page 8: per particle - what the clusters truly are, and what each method calls them
       cv->Clear();
       cv->Divide(3, 1);
       TString ttl[3] = {"true class (photons in the cluster)", TString::Format("%s (set %d)", method, featureSet),
@@ -769,7 +844,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       const int nFeatPages = (NVAR + 7) / 8;
       cv->Print(nFeatPages > 0 ? pdf.Data() : (pdf + ")").Data());
 
-      // pages 8+: every input feature, one histogram per particle, unit area
+      // pages 9+: every input feature, one histogram per particle, unit area
       const int nClu = (int)featPart.size();
       for (int pg = 0; pg < nFeatPages; pg++) {
          cv->Clear();
@@ -844,6 +919,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
          purE_st[k]->Write();
       }
       for (int t = 0; t < 3; t++) hScore[k][t]->Write();
+      for (int q = 0; q < kNIn; q++) hIn[k][q]->Write();
    }
    for (int k = 0; k < 3; k++) {
       effU_ml[k]->Write();

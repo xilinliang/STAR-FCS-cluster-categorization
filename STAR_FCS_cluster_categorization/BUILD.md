@@ -361,6 +361,34 @@ uses the same header — so it can evaluate on exactly the clusters the model ne
 saw. A weight file trained *before* this change used TMVA's random split; re-train
 before evaluating it.
 
+### ePIC-style labels: single EM / hadronic / merged π⁰ by generated particle
+
+The default labels count the photons inside each cluster (`mcLabel`). With the
+last argument `labelDef=1`, `trainTMVA.C` labels by the **generated particle**
+instead, as in the ePIC study (rule in `StFcsTrainTestSplit.h`):
+
+| input category | cluster | trained as |
+|---|---|---|
+| γ input | γ event, the photon inside | 1 single EM |
+| π⁰ 1-cluster input | π⁰ event, **both** photons inside | 2 merged π⁰ |
+| π⁰ 2-cluster input | π⁰ event, **one** photon inside (resolved π⁰) | not trained |
+| π⁻ input | any cluster of a π⁻ event | 0 hadronic |
+
+Gun fragments with no photon inside are dropped from the γ and π⁰ samples. The
+three scores keep their order — `r[0]` P(hadronic), `r[1]` P(single EM), `r[2]`
+P(merged π⁰) — so the makers use the model unchanged. The job gets a `gen` suffix:
+
+```csh
+root4star -b -q 'trainTMVA.C+("feat_pico_all.root","FcsCat",13,"clusters",0.8,0.5,1)'
+root4star -b -q 'evalCategory.C+("feat_pico_all.root","weights/FcsCat13gen_BDTG.weights.xml",13,"BDTG",1,"",0.5,0.8,"clusters",1,1)'
+```
+
+Evaluate it with `truthDef=1`, so that the evaluation truth is the training
+label. Page 6 of the evaluation PDF is the ePIC score figure: P(Single EM),
+P(Hadronic), P(Merged π⁰), each for γ / π⁰ 2-cluster / π⁰ 1-cluster / π⁻ input.
+The π⁰ 2-cluster clusters are shown there even though they were not trained on;
+a good model gives them a high P(Single EM). Needs `genPid`: re-dump older files.
+
 ## 3b. Efficiency, purity, and STAR's categorization beside it
 
 TMVA's summary table ("best signal efficiency times signal purity") tunes a
@@ -434,7 +462,7 @@ photon and no feature can tell them apart. With `genPid` present,
 `evalCategory.C` adds, per particle (γ / π⁰ / π⁻):
 
 - what its clusters truly are, what the model calls them, and what the FCS Cluster
-  category calls them — printed, and as page 7 of the PDF;
+  category calls them — printed, and as page 8 of the PDF;
 - every input feature of the chosen set drawn separately for each particle, on the
   pages after it, so the characteristics the model learns from are visible directly.
 

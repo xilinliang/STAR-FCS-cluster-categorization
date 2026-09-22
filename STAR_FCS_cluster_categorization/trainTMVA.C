@@ -43,6 +43,23 @@
 // The input file can come from a .fzd, a MuDst or a picoDst - all three write
 // this same tree, and all three carry the generator-level label mcLabel.
 //
+// LABELS (labelDef, the last argument)
+//   0 (default) by the photons inside the cluster (mcLabel): other /
+//     onePhoton / twoPhoton. Every cluster of every sample is used.
+//   1 ePIC-style, by the generated particle (genPid) of a single-particle
+//     sample, cleaned with mcLabel - see StFcsTrainTestSplit.h:
+//       class 0 hadronic   = every cluster of a pi- event
+//       class 1 single EM  = gamma-event cluster holding the photon
+//       class 2 merged pi0 = pi0-event cluster holding BOTH photons
+//     Resolved pi0 photons ("pi0 2-cluster input") and gun fragments are not
+//     trained on; evalCategory.C still shows their scores. Needs genPid, so
+//     re-dump older feature files. The job gets a "gen" suffix so it does not
+//     overwrite the mcLabel model:
+//       root4star -b -q 'trainTMVA.C+("feat_pico_all.root","FcsCat",13,"clusters",0.8,0.5,1)'
+//       -> weights/FcsCat13gen_BDTG.weights.xml
+//     The class order - and so the order of the three scores - is the same
+//     for both: r[0] hadronic/other, r[1] single EM, r[2] merged pi0.
+//
 // author: generated for Xilin Liang
 
 #include "TCut.h"
@@ -61,14 +78,16 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
                int featureSet = 13,          // 3, 6, 13 or 34 - see the note above
                const char* treename = "clusters",
                float purityCut = 0.8,
-               float eMin = 0.5) {
+               float eMin = 0.5,
+               int labelDef = 0) {           // 0 mcLabel, 1 generated particle (ePIC-style)
    using namespace StFcsClusterFeatures;
    gSystem->Load("libTMVA");
    TMVA::Tools::Instance();
 
    const int NVAR = nVar(featureSet);
    const char** varname = varNames(featureSet);
-   const TString job = Form("%s%d", jobname, featureSet);
+   if (labelDef != 1) labelDef = 0;
+   const TString job = Form("%s%d%s", jobname, featureSet, labelDef == 1 ? "gen" : "");
    printf("training feature set %d (%d variables), job %s\n", featureSet, NVAR, job.Data());
 
    // ---------------------------------------------------------------- input
@@ -104,6 +123,14 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    mcLabel = -1;
    if (in->GetBranch("mcLabel")) in->SetBranchAddress("mcLabel", &mcLabel);
    in->SetBranchAddress("truthPurity", &truthPurity);
+   Int_t genPid = 0;
+   if (in->GetBranch("genPid")) {
+      in->SetBranchAddress("genPid", &genPid);
+   } else if (labelDef == 1) {
+      printf("labelDef=1 labels by the generated particle, but %s has no genPid branch.\n"
+             "Re-dump it with the current feature maker, or use labelDef=0.\n", infile);
+      return;
+   }
 
    // ------------------------------------------------- flat training trees
    TFile* ftmp = new TFile(job + "_train.root", "RECREATE");
@@ -133,7 +160,7 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
 
    // accounting, so that an empty training sample explains itself
    const bool haveMcBranch = (in->GetBranch("mcLabel") != 0);
-   Long64_t nBelowE = 0, nNoTruth = 0, nImpure = 0, nNoTowers = 0;
+   Long64_t nBelowE = 0, nNoTruth = 0, nImpure = 0, nNoTowers = 0, nNotSample = 0;
 
    // range of every input variable over the kept clusters. TMVA aborts the
    // whole job on a constant one - see the check after the loop.
@@ -165,7 +192,16 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
       // the generator-level branches existed.
       // the rule itself lives in StFcsTrainTestSplit.h, so that evalCategory.C
       // judges the model against exactly the labels it was trained on
-      const int cls = StFcsTrainTestSplit::trainingLabel(mcLabel, truthNPhoton, truthPurity, purityCut);
+      int cls = StFcsTrainTestSplit::trainingLabel(mcLabel, truthNPhoton, truthPurity, purityCut);
+      if (labelDef == 1 && cls >= 0) {
+         // ePIC-style: the generated particle decides; resolved pi0 photons
+         // and gun fragments are left out (StFcsTrainTestSplit.h)
+         cls = StFcsTrainTestSplit::sampleLabel(genPid, mcLabel);
+         if (cls < 0) {
+            nNotSample++;
+            continue;
+         }
+      }
       if (cls < 0) {
          if (mcLabel < 0 && truthNPhoton < 0)
             nNoTruth++;  // no truth at all on this cluster
@@ -221,12 +257,17 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    printf("  no truth on the cluster      : %lld\n", nNoTruth);
    printf("  truth present, cut by purity : %lld\n", nImpure);
    printf("  no usable tower list         : %lld\n", nNoTowers);
+   if (labelDef == 1)
+      printf("  not a training class (labelDef=1: resolved pi0 photon, fragment, other gun): %lld\n", nNotSample);
    printf("  KEPT  other=%lld  1photon=%lld  2photon=%lld\n", kept[0], kept[1], kept[2]);
    printf("  split by event (%ld events): train %lld / %lld / %lld, test %lld / %lld / %lld\n",
           splitter.nEvents(), kept[0] - keptTest[0], kept[1] - keptTest[1], kept[2] - keptTest[2],
           keptTest[0], keptTest[1], keptTest[2]);
-   printf("  label source: %s\n", haveMcBranch ? "mcLabel (generator level)"
-                                               : "truthNPhoton (hit level); no mcLabel branch");
+   printf("  label source: %s\n", labelDef == 1 ? "generated particle (genPid), cleaned with mcLabel"
+                                 : haveMcBranch  ? "mcLabel (generator level)"
+                                                 : "truthNPhoton (hit level); no mcLabel branch");
+   if (labelDef == 1)
+      printf("  classes: other = hadronic (pi-), onePhoton = single EM (gamma), twoPhoton = merged pi0\n");
 
    if (kept[0] + kept[1] + kept[2] == 0) {
       printf("\nNothing to train on. Reading the numbers above:\n");

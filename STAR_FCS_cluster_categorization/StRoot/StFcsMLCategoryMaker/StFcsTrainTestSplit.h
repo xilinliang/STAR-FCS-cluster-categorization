@@ -2,6 +2,7 @@
 // evalCategory.C, so the two can never disagree about it:
 //   - which clusters are TRAINING and which are TEST   (EventSplitter)
 //   - what a cluster's true class is                   (trainingLabel)
+//     or, ePIC-style, by generated particle          (sampleLabel, inputCategory)
 //
 // WHY THIS EXISTS
 //
@@ -73,6 +74,47 @@ inline int trainingLabel(int mcLabel, int truthNPhoton, float truthPurity, float
    if (truthNPhoton >= 2) return 2;
    if (truthPurity < purityCut) return -1;
    return truthNPhoton;  // 0 or 1
+}
+
+// ---------------------------------------------------------------------------
+// GENERATED-PARTICLE LABELS - the ePIC-style alternative (labelDef = 1 in
+// trainTMVA.C, truthDef = 1 in evalCategory.C). The class is set by which
+// single-particle sample the cluster came from (genPid, GEANT3: 1 gamma,
+// 7 pi0, 9 pi-), cleaned with mcLabel so that each class holds the object it
+// is named after:
+//
+//   input category (inputCategory)        class trained (sampleLabel)
+//   0  gamma input      gamma, mcLabel 1  -> 1 single EM
+//   1  pi0 2-cluster    pi0,   mcLabel 1  -> not trained (-1): one photon of a
+//                                            RESOLVED pi0, i.e. a single EM
+//                                            shower that no feature can tell
+//                                            from a gun photon
+//   2  pi0 1-cluster    pi0,   mcLabel 2  -> 2 merged pi0
+//   3  pi- input        pi-,   any        -> 0 hadronic
+//   -1 anything else (gun fragments with no photon inside, other guns)
+//
+// "1-cluster" / "2-cluster" is decided per CLUSTER from the photons inside it:
+// both pi0 photons in this cluster = the pi0 made one cluster; one photon =
+// the pi0 was resolved into two. That is the event-level ePIC split without
+// being fooled by small fragment clusters.
+inline int inputCategory(int genPid, int mcLabel) {
+   if (genPid == 1) return (mcLabel == 1) ? 0 : -1;
+   if (genPid == 7) {
+      if (mcLabel == 1) return 1;
+      if (mcLabel >= 2) return 2;
+      return -1;
+   }
+   if (genPid == 9) return 3;
+   return -1;
+}
+
+inline int sampleLabel(int genPid, int mcLabel) {
+   switch (inputCategory(genPid, mcLabel)) {
+      case 0: return 1;  // single EM
+      case 2: return 2;  // merged pi0
+      case 3: return 0;  // hadronic
+      default: return -1;
+   }
 }
 
 }  // namespace StFcsTrainTestSplit
