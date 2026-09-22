@@ -261,6 +261,30 @@ FCS hits in the `.fzd`. Labels come from `mcLabel` (generator level: how many
 generated photons project onto the cluster) with `truthNPhoton` (hit level) as
 fallback for older files.
 
+## 2b. Feature QA for one file
+
+Before training on a new sample, look at every variable the model will see:
+
+```bash
+./runQA.sh pi0.e30.vz0.all.MuDst.root        # or a .picoDst.root; [nevt] [eMin] optional
+```
+
+It dumps the features (`runMudst_ml.C` as simulation, or `runPicoDst_ml.C`,
+chosen from the file name; skipped if `feat_<name>.root` already exists) and runs
+`qaFeatures.C`, which computes sets 3 and 13 with the same `StFcsClusterFeatures.h`
+the training uses. `qa_<name>.pdf` holds:
+
+- page 1: cluster energy, generated energy, north/south centroid maps, nTowers,
+  nNeighbor, the FCS Cluster category, the true class;
+- page 2: σ_max vs E with STAR's two category boundaries drawn on;
+- per set: every variable split by true class (unit area, all clusters dashed),
+  then every variable against cluster energy.
+
+`qa_<name>.log` has the per-variable table — non-finite values, min/max/mean/rms,
+the share at the single most common value, and the mean per true class. A variable
+flagged `CONSTANT` is the one TMVA would abort on. On an existing feature file:
+`root4star -b -q 'qaFeatures.C+("feat_pico_all.root","qa_all")'`.
+
 ## 3. Train
 
 ```csh
