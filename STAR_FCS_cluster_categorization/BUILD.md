@@ -280,6 +280,11 @@ the training uses. `qa_<name>.pdf` holds:
 - per set: every variable split by true class (unit area, all clusters dashed),
   then every variable against cluster energy.
 
+The energy axes end at the gun energy taken from the file name — the `e60` in
+`pi0.e60.vz0.all.picoDst.root` (and in the `feat_...` file made from it) gives a
+0–60 GeV axis. With no such token the largest energy in the file is used, rounded
+up. A fourth argument overrides it: `./runQA.sh file.root -1 0.5 40`.
+
 `qa_<name>.log` has the per-variable table — non-finite values, min/max/mean/rms,
 the share at the single most common value, and the mean per true class. A variable
 flagged `CONSTANT` is the one TMVA would abort on. On an existing feature file:

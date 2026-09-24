@@ -35,11 +35,17 @@
 // (real data) are shown as "no truth"; every panel also has all clusters in
 // black dashes, so the macro is equally useful on data.
 //
+// ENERGY AXIS. Every energy axis ends at the gun energy of the sample, taken
+// from the file name: pi0.e60.vz0.all.picoDst.root, or the feature file made
+// from it, gives 60 GeV. With no such token in the name the largest energy in
+// the file is used instead, rounded up. Pass eMax to set it by hand.
+//
 // author: generated for Xilin Liang
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <vector>
@@ -67,6 +73,37 @@ const char* kQaClsName[kNCls] = {"other", "onePhoton", "twoPhoton", "no truth"};
 const int kQaClsColor[kNCls] = {kGray + 2, kAzure + 1, kOrange + 7, kMagenta + 1};
 
 bool bad(float v) { return v != v || fabs(v) > 1e30; }
+
+// The gun energy of a single-particle file, read from its name: the token
+// ".e<number>" or "_e<number>", as in pi0.e60.vz0.all.picoDst.root -> 60.
+// Returns 0 when the name has no such token (real data, a mixed sample, or a
+// name written some other way), and then the energy axis is set from the file
+// itself instead.
+double gunEnergyFromName(const char* name) {
+   if (!name) return 0;
+   const char* s = name;
+   for (const char* p = name; *p; p++) {
+      if ((*p != '.' && *p != '_' && *p != '/') || (p[1] != 'e' && p[1] != 'E')) continue;
+      const char* d = p + 2;
+      if (*d < '0' || *d > '9') continue;
+      const double v = atof(d);
+      // the token has to END here, so that ".eta05" or ".energy" is not read
+      // as a number
+      while (*d >= '0' && *d <= '9') d++;
+      if (*d == '.' || *d == '_' || *d == 0) {
+         if (v > 0 && v < 1e4) return v;
+      }
+   }
+   (void)s;
+   return 0;
+}
+
+// round up to a round number, so the axis ends at 30 or 60 rather than 58.7
+double niceCeil(double v) {
+   if (v <= 0) return 1;
+   const double step = (v <= 20) ? 2 : (v <= 50) ? 5 : 10;
+   return step * ceil(v / step);
+}
 
 // 0.5 - 99.5 % quantile range of the finite values, padded by 3 %, so one
 // outlier cannot squeeze the distribution into a single bin
@@ -116,6 +153,7 @@ void drawOverlay(TH1F** h, int n) {
 void qaFeatures(const char* infile = "feat_pico.root",
                 const char* outName = "",    // default: qa_<input file name without .root>
                 float eMin = 0.5,            // same cut as trainTMVA.C / evalCategory.C
+                float eMax = 0,              // upper end of every energy axis; 0 = automatic
                 const char* treename = "clusters") {
    using namespace StFcsClusterFeatures;
    gROOT->SetBatch(kTRUE);
@@ -170,6 +208,31 @@ void qaFeatures(const char* infile = "feat_pico.root",
    const bool haveGen = (in->GetBranch("genE") != 0);
    if (haveGen) in->SetBranchAddress("genE", &genE);
 
+   // ------------------------------------------------------- energy axis
+   //
+   // A 30 GeV gun drawn on a 0-60 axis wastes half the page, and a 60 GeV gun
+   // on a 0-32 axis loses its top half altogether. So the upper end follows the
+   // sample: the gun energy in the file name when it has one (pi0.e60... -> 60),
+   // otherwise the largest energy actually in the file, rounded up.
+   double eTop = eMax;
+   const char* eTopFrom = "the eMax argument";
+   if (eTop <= 0) {
+      eTop = gunEnergyFromName(infile);
+      eTopFrom = "the gun energy in the file name";
+   }
+   if (eTop <= 0) {
+      double m = in->GetMaximum("e");
+      if (haveGen) {
+         const double g = in->GetMaximum("genE");
+         if (g > m) m = g;
+      }
+      eTop = niceCeil(1.05 * m);
+      eTopFrom = "the largest energy in the file";
+   }
+   if (eTop <= eMin) eTop = niceCeil(2 * eMin);
+   printf("energy axes run 0 - %.3g GeV, from %s\n", eTop, eTopFrom);
+   const int nEbin = 64;
+
    // ---------------------------------------------------- the two feature sets
    const int nSet = 2;
    const int sets[nSet] = {3, 13};
@@ -178,8 +241,8 @@ void qaFeatures(const char* infile = "feat_pico.root",
    std::vector<float> eClu;                 // cluster energy of each stored cluster
 
    // ------------------------------------------------------ overview histos
-   TH1F* hE = new TH1F("hE", "cluster energy;E [GeV];clusters", 64, 0, 32);
-   TH1F* hGenE = new TH1F("hGenE", "generated (gun) energy, per cluster;E_{gen} [GeV];clusters", 64, 0, 32);
+   TH1F* hE = new TH1F("hE", "cluster energy;E [GeV];clusters", nEbin, 0, eTop);
+   TH1F* hGenE = new TH1F("hGenE", "generated (gun) energy, per cluster;E_{gen} [GeV];clusters", nEbin, 0, eTop);
    TH2F* hXY[2];
    for (int d = 0; d < 2; d++)
       hXY[d] = new TH2F(Form("hXY_det%d", d), Form("centroid, det %d (%s);x [column];y [row]", d, d == 0 ? "north" : "south"),
@@ -188,7 +251,7 @@ void qaFeatures(const char* infile = "feat_pico.root",
    TH1F* hNNb = new TH1F("hNNb", "neighbouring clusters;nNeighbor;clusters", 6, -0.5, 5.5);
    TH1F* hCat = new TH1F("hCat", "FCS Cluster category;category;clusters", 3, -0.5, 2.5);
    TH1F* hCls = new TH1F("hCls", "true class (mcLabel);;clusters", kNCls, -0.5, kNCls - 0.5);
-   TH2F* hSigE = new TH2F("hSigE", "sigmaMax vs E, nTowers #geq 5;E [GeV];#sigma_{max} [cells]", 64, 0, 32, 60, 0, 3);
+   TH2F* hSigE = new TH2F("hSigE", "sigmaMax vs E, nTowers #geq 5;E [GeV];#sigma_{max} [cells]", nEbin, 0, eTop, 60, 0, 3);
 
    // ---------------------------------------------------------- event loop
    const int half = NW / 2;
@@ -320,7 +383,7 @@ void qaFeatures(const char* infile = "feat_pico.root",
    const int nPt = 60;
    double ex[nPt], cut2[nPt], cut1[nPt];
    for (int j = 0; j < nPt; j++) {
-      ex[j] = 1.0 + 31.0 * j / (nPt - 1);
+      ex[j] = 1.0 + (eTop - 1.0) * j / (nPt - 1);
       cut2[j] = 1.0 / 2.5 + 0.003 * ex[j] + 7.0 / ex[j];
       cut1[j] = 1.0 / 2.1 - 0.001 * ex[j] + 2.0 / ex[j];
    }
@@ -440,8 +503,8 @@ void qaFeatures(const char* infile = "feat_pico.root",
             double lo, hi;
             quantileRange(val[s][v], lo, hi);
             TH2F* h2 = new TH2F(Form("hS%d_%s_vsE", set, names[v]),
-                                Form("set %d: %s vs E;cluster E [GeV];%s", set, names[v], names[v]), 32, 0, 32, 40, lo,
-                                hi);
+                                Form("set %d: %s vs E;cluster E [GeV];%s", set, names[v], names[v]), 32, 0, eTop, 40,
+                                lo, hi);
             for (int i = 0; i < nClu; i++)
                if (!bad(val[s][v][i])) h2->Fill(eClu[i], val[s][v][i]);
             cv->cd(j + 1);

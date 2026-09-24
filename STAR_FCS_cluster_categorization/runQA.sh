@@ -3,9 +3,12 @@
 #   1. dump the cluster features  (runPicoDst_ml.C or runMudst_ml.C, mode 0)
 #   2. plot every variable of feature sets 3 and 13  (qaFeatures.C)
 #
-# usage:  ./runQA.sh <file.picoDst.root | file.MuDst.root> [nevt] [eMin]
+# usage:  ./runQA.sh <file.picoDst.root | file.MuDst.root> [nevt] [eMin] [eMax]
 #   nevt  events to read, -1 = all (default)
 #   eMin  minimum cluster energy in GeV (default 0.5, as in training)
+#   eMax  upper end of the energy axes in GeV; 0 (default) reads the gun energy
+#         from the file name - pi0.e60.vz0.all.picoDst.root gives 60 GeV - and
+#         falls back to the largest energy in the file when the name has none
 #
 # example:
 #   ./runQA.sh pi0.e30.vz0.all.MuDst.root
@@ -24,8 +27,9 @@ set -e
 in="$1"
 nevt="${2:--1}"
 emin="${3:-0.5}"
+emax="${4:-0}"
 if [ -z "$in" ] || [ ! -f "$in" ]; then
-   echo "usage: $0 <file.picoDst.root | file.MuDst.root> [nevt] [eMin]"
+   echo "usage: $0 <file.picoDst.root | file.MuDst.root> [nevt] [eMin] [eMax]"
    exit 1
 fi
 
@@ -61,5 +65,5 @@ if [ ! -f "$feat" ]; then
 fi
 
 echo "== QA plots for feature sets 3 and 13"
-root4star -b -q "qaFeatures.C+(\"$feat\",\"$qa\",$emin)" 2>&1 | tee "${qa}.log"
+root4star -b -q "qaFeatures.C+(\"$feat\",\"$qa\",$emin,$emax)" 2>&1 | tee "${qa}.log"
 echo "== done: ${qa}.pdf"
