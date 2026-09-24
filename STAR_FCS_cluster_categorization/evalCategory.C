@@ -90,6 +90,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -141,6 +142,22 @@ const int kNIn = 4;
 const char* kInRoot[kNIn] = {"#gamma input", "#pi^{0} 2-cluster input", "#pi^{0} 1-cluster input", "#pi^{-} input"};
 const char* kInTxt[kNIn] = {"gamma", "pi0_2cluster", "pi0_1cluster", "pim"};
 const int kInColor[kNIn] = {kBlack, kGreen + 2, kRed, kBlue};
+
+// The gun energy of a single-particle file, from its name: ".e<number>" or
+// "_e<number>", as in feat_pi0.e60.vz0.all.picoDst.root -> 60. Returns 0 when
+// the name carries no such token. Same rule as qaFeatures.C.
+double gunEnergyFromName(const char* name) {
+   if (!name) return 0;
+   for (const char* p = name; *p; p++) {
+      if ((*p != '.' && *p != '_' && *p != '/') || (p[1] != 'e' && p[1] != 'E')) continue;
+      const char* d = p + 2;
+      if (*d < '0' || *d > '9') continue;
+      const double v = atof(d);
+      while (*d >= '0' && *d <= '9') d++;
+      if ((*d == '.' || *d == '_' || *d == 0) && v > 0 && v < 1e4) return v;
+   }
+   return 0;
+}
 
 // binomial error on a fraction pass/total
 double binomErr(double pass, double total) {
@@ -219,7 +236,8 @@ void evalCategory(const char* infile = "feat_pico_all.root",
                   float purityCut = 0.8,
                   const char* treename = "clusters",
                   int truthDef = 0,     // 0 mcLabel, 1 gun particle cleaned, 2 gun particle raw - see header
-                  int energyAxis = 0) { // 0 cluster E, 1 generated (gun) E - ePIC-style pages
+                  int energyAxis = 0,   // 0 cluster E, 1 generated (gun) E - ePIC-style pages
+                  float eAxisMax = 0) { // upper end of the energy axes; 0 = automatic
    using namespace StFcsClusterFeatures;
    gSystem->Load("libTMVA");
    gROOT->SetBatch(kTRUE);
@@ -303,12 +321,51 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       printf("energyAxis=1 needs the genE branch, which %s does not have - using cluster E\n", infile);
       energyAxis = 0;
    }
+   // ------------------------------------------------------- energy axis
+   //
+   // A 60 GeV sample drawn on a fixed 0-32 GeV axis silently loses half its
+   // range, so the axes follow the sample: the gun energy in the file name
+   // (feat_pi0.e60... -> 60), else the largest energy in the file, rounded up
+   // to a round number. eAxisMax overrides both. The confusion matrices and the
+   // printed numbers always use every cluster, whatever the axis shows.
+   double eTop = eAxisMax;
+   const char* eTopFrom = "the eAxisMax argument";
+   if (eTop <= 0) {
+      eTop = gunEnergyFromName(infile);
+      eTopFrom = "the gun energy in the file name";
+   }
+   if (eTop <= 0) {
+      double m = in->GetMaximum("e");
+      if (haveGen) {
+         const double g = in->GetMaximum("genE");
+         if (g > m) m = g;
+      }
+      const double step = (m <= 20) ? 2 : (m <= 50) ? 5 : 10;
+      eTop = step * ceil(1.05 * m / step);
+      eTopFrom = "the largest energy in the file";
+   }
+   if (eTop <= eMin + 1) eTop = eMin + 10;
+   printf("energy axes run 0 - %.3g GeV, from %s\n", eTop, eTopFrom);
+
    const char* truthTxt[3] = {"photons inside the cluster (mcLabel)", "gun particle, cleaned",
                               "gun particle, every cluster of the event"};
 
    // ------------------------------------------------------------ histograms
-   const int nEB = 10;
-   const double eBins[nEB + 1] = {0.5, 1, 2, 3, 5, 7, 10, 14, 18, 24, 32};
+   // fine at low energy, coarse at high energy, extended to eTop
+   std::vector<double> eBinV;
+   const double eSeed[11] = {0.5, 1, 2, 3, 5, 7, 10, 14, 18, 24, 32};
+   for (int b = 0; b < 11; b++)
+      if (eSeed[b] < eTop) eBinV.push_back(eSeed[b]);
+   while (eBinV.back() < eTop - 1e-6) eBinV.push_back(std::min(eTop, eBinV.back() * 1.35));
+   eBinV.back() = eTop;
+   // a last bin much narrower than its neighbour is a sliver with no statistics
+   const size_t nB = eBinV.size();
+   if (nB > 2 && (eBinV[nB - 1] - eBinV[nB - 2]) < 0.5 * (eBinV[nB - 2] - eBinV[nB - 3])) {
+      eBinV[nB - 2] = eBinV[nB - 1];
+      eBinV.pop_back();
+   }
+   const int nEB = (int)eBinV.size() - 1;
+   const double* eBins = &eBinV[0];
    const int nSB = 12;
    const double sBins[nSB + 1] = {0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 11.0};
 
@@ -325,9 +382,13 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    }
    // ePIC-style: uniform bins in the energy chosen by energyAxis
    const char* eAxisTitle = (energyAxis == 1) ? "generated energy [GeV]" : "cluster energy [GeV]";
-   const int nUB = 16;
-   double uBins[nUB + 1];
-   for (int b = 0; b <= nUB; b++) uBins[b] = 2.0 * b;
+   // uniform bins for the ePIC-style pages: 2 GeV up to 32 GeV, wider above so
+   // a 60 GeV sample does not end up with 30 sparse bins
+   const double uStep = (eTop <= 36) ? 2.0 : 4.0;
+   const int nUB = (int)ceil(eTop / uStep);
+   std::vector<double> uBinV(nUB + 1);
+   for (int b = 0; b <= nUB; b++) uBinV[b] = uStep * b;
+   const double* uBins = &uBinV[0];
    TEfficiency *effU_ml[3], *purU_ml[3], *effU_st[3], *purU_st[3];
    for (int k = 0; k < 3; k++) {
       effU_ml[k] = makeEff(Form("effU_ml_%s", kClsName[k]), Form("model efficiency, %s;%s;efficiency", kClsName[k], eAxisTitle), nUB, uBins);

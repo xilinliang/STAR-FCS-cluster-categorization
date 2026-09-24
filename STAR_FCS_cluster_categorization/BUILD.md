@@ -454,8 +454,12 @@ energy. Both need `genPid`/`genE`. The closest match to the ePIC figure:
 root4star -b -q 'evalCategory.C+("feat_pico_all.root","weights/FcsCat13_BDTG.weights.xml",13,"BDTG",1,"",0.5,0.8,"clusters",1,1)'
 ```
 
-`truthDef` applies to every page, confusion matrices included. The energy axis
-runs 0–32 GeV in 2 GeV bins (the FCS guns stop at 30 GeV).
+`truthDef` applies to every page, confusion matrices included. The energy axes
+follow the sample, as in `qaFeatures.C`: the `e60` in `feat_pi0.e60...root` gives
+0–60 GeV, otherwise the largest energy in the file, rounded up; a last argument
+`eAxisMax` overrides it. Bins are 2 GeV wide up to 32 GeV and 4 GeV above. Only
+the axes change — the confusion matrices and the printed numbers always use every
+cluster.
 
 **Per generated particle.** Every feature file now carries `genPid`, `genE` and
 `nGen`: the GEANT id and energy of the generated (gun) particle of the event — for
