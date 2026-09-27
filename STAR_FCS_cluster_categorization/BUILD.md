@@ -485,6 +485,48 @@ only clusters it categorised outright. The fitter resolves its ambiguous ones
 later, using a χ² that picoDst does not keep usefully, so STAR's numbers here are a
 lower bound on what the full STAR chain achieves.
 
+### Weighted training: flat in cluster energy
+
+`trainTMVA.C`'s last argument, `weightMode=1`, weights each cluster by
+1/N(class, cluster-energy bin), so every class has a flat energy spectrum:
+
+```csh
+root4star -b -q 'trainTMVA.C+("feat_pico_all.root","FcsCat",13,"clusters",0.8,0.5,1,1)'
+#  -> weights/FcsCat13genw_BDTG.weights.xml  (the "w" marks the weighted job)
+```
+
+Why: a 60 GeV π⁻ leaves several 1–3 GeV clusters while a γ leaves one cluster
+with nearly all its energy, so the low end of the training sample is almost pure
+hadron and the high end almost pure photon. Both BDTG and MLP learn that mix as a
+prior — single-EM efficiency collapses below 5 GeV, hadron efficiency above
+35 GeV. The weights remove the prior; the shower shape then decides.
+
+Thin bins are merged (fewer than 50 clusters), weights are capped at 10× the class
+median, and the job prints a per-class table with the weight range and how many
+bins were merged or capped. Check that table: a class with a huge weight range is
+a class whose energy spectrum barely overlaps the others.
+
+What it cannot do: make the classes equal bin by bin. Each class gets a flat
+spectrum and TMVA then equalises class totals, so a class present in fewer energy
+bins keeps a larger share where it does live. Where a class is absent entirely —
+merged π⁰ below ~10 GeV — nothing is done, and nothing should be: that is
+kinematics.
+
+### Comparing models
+
+`compareModels.C` reads the `.root` files `evalCategory.C` already wrote and puts
+two to four of them on one figure, with the FCS Cluster category from the first
+file as a reference:
+
+```csh
+root4star -b -q 'compareModels.C+("evalFcsCat13_BDTG.root","BDTG set 13","evalFcsCat13_MLP.root","MLP set 13")'
+```
+
+It prints efficiency and purity per class summed over all bins, and the merged-π⁰
+efficiency bin by bin in photon separation with the cluster count per bin, then
+writes a three-page PDF. The inputs must be evaluations of the same feature file
+with the same `truthDef`; nothing checks that.
+
 ## 4. Apply
 
 **On MuDst** — the only place the categorization can change the physics, because
@@ -508,6 +550,30 @@ root4star -b -q 'runPicoDst_ml.C("<picoDst or .list>",-1,0,3,"","feat_pico.root"
 root4star -b -q 'runPicoDst_ml.C("<picoDst or .list>",-1,1,3,"weights/FcsCat3_BDTG.weights.xml")'
 # mode 2: both, in one pass
 ```
+
+### 4b. On real data, end to end
+
+```bash
+./runData.sh st_physics_23045012.picoDst.root weights/FcsCat13genw_MLP.weights.xml 13 MLP
+```
+
+Three steps: dump the features of the data clusters and QA them, apply the model,
+then draw what changed.
+
+- **`qa_<tag>.pdf`** — the data features. Compare with `./runQA.sh` on a simulated
+  sample before believing anything else: a variable that looks different in data
+  means the model was trained on something the detector does not produce. The
+  true-class panels are empty on data, as expected.
+- **`dataResult_<tag>.pdf`** (from `plotDataResult.C`) — the cluster-pair mass with
+  STAR's category and with the model's, overlaid, and the migration matrix. The
+  entries to look at are STAR "1 onePhoton" → model "merged π⁰" (π⁰s the standard
+  chain would fit as one photon) and → "hadronic" (contamination removed).
+- **`cat_<tag>.root`** — per cluster, the three scores, the model's class and
+  STAR's.
+
+The pair mass here is a diagnostic built from cluster pairs, not from fitted
+points. For the physics number, run your own π⁰ finder with the ML category and
+compare the yield and peak with the standard chain.
 
 ## 5. Batch
 

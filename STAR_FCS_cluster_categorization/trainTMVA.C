@@ -60,7 +60,45 @@
 //     The class order - and so the order of the three scores - is the same
 //     for both: r[0] hadronic/other, r[1] single EM, r[2] merged pi0.
 //
+// TRAINING WEIGHTS (weightMode, the argument after labelDef)
+//   0 (default) every cluster counts once.
+//   1 FLAT IN CLUSTER ENERGY. Each cluster is weighted by 1/N(class, energy
+//     bin), so within any energy bin the three classes are equally common.
+//
+//     Why: the classes are not mixed evenly along the energy axis. A 60 GeV
+//     pi- leaves several clusters of 1-3 GeV, while a gamma leaves one cluster
+//     carrying nearly all of its energy - so the low-energy end of the sample
+//     is almost pure hadron and the high-energy end almost pure photon. The
+//     model sees the energy (logE in set 13, e in set 3) and learns that mix
+//     as a prior: single-EM efficiency collapses below 5 GeV and hadron
+//     efficiency collapses above 35 GeV, in both BDTG and MLP. Weighting
+//     removes the prior and leaves the shower shape to decide.
+//
+//     The binning is in CLUSTER energy - the quantity the model is given, not
+//     the generated energy. A bin with fewer than kMinBin clusters of a class
+//     is merged into its neighbour, and weights are capped at kWCap times the
+//     class median so a handful of clusters cannot dominate the loss. The
+//     printout lists, per class, the weight range and how many bins were
+//     merged or capped; look at it before trusting a model.
+//
+//     WHAT IT DOES AND DOES NOT DO. Each class ends up with a FLAT energy
+//     spectrum, and TMVA then scales the three classes to equal totals. So the
+//     brutal part of the prior goes away - a 9:1 hadron majority in the lowest
+//     bin becomes roughly 1.5:1 - but the classes are not made exactly equal
+//     bin by bin: a class present in fewer energy bins keeps a larger share in
+//     the bins where it does live. Nothing can be done where a class is simply
+//     absent (merged pi0 below ~10 GeV), and nothing should be: that is
+//     kinematics, not a sampling artefact.
+//
+//     The job name gets a "w" suffix, so a weighted model never overwrites an
+//     unweighted one:
+//       trainTMVA.C+("feat_all.root","FcsCat",13,"clusters",0.8,0.5,1,1)
+//       -> weights/FcsCat13genw_BDTG.weights.xml
+//
 // author: generated for Xilin Liang
+
+#include <algorithm>
+#include <vector>
 
 #include "TCut.h"
 #include "TFile.h"
@@ -79,7 +117,8 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
                const char* treename = "clusters",
                float purityCut = 0.8,
                float eMin = 0.5,
-               int labelDef = 0) {           // 0 mcLabel, 1 generated particle (ePIC-style)
+               int labelDef = 0,             // 0 mcLabel, 1 generated particle (ePIC-style)
+               int weightMode = 0) {         // 0 unweighted, 1 flat in cluster energy
    using namespace StFcsClusterFeatures;
    gSystem->Load("libTMVA");
    TMVA::Tools::Instance();
@@ -87,7 +126,9 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    const int NVAR = nVar(featureSet);
    const char** varname = varNames(featureSet);
    if (labelDef != 1) labelDef = 0;
-   const TString job = Form("%s%d%s", jobname, featureSet, labelDef == 1 ? "gen" : "");
+   if (weightMode != 1) weightMode = 0;
+   const TString job = Form("%s%d%s%s", jobname, featureSet, labelDef == 1 ? "gen" : "",
+                            weightMode == 1 ? "w" : "");
    printf("training feature set %d (%d variables), job %s\n", featureSet, NVAR, job.Data());
 
    // ---------------------------------------------------------------- input
@@ -143,12 +184,28 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    // clusters. The split is made here instead, by whole event, with the rule
    // in StFcsTrainTestSplit.h that evalCategory.C applies too.
    Float_t isTest = 0;
-   StFcsTrainTestSplit::EventSplitter splitter;
+   // ---------------------------------------------------- training weights
+   // Bin edges in CLUSTER energy: fine where the class mix changes fastest,
+   // coarse where it does not. The last bin is open-ended.
+   const int kNWB = 14;
+   const double wEdge[kNWB + 1] = {0.0, 1, 2, 3, 5,  7,  10, 15,
+                                   20,  25, 30, 40, 50, 60, 1e9};
+   const int kMinBin = 50;    // fewer clusters than this: merge into the neighbour
+   const double kWCap = 10.0; // cap a weight at this times the class median
+   double wCount[3][kNWB];
+   for (int c = 0; c < 3; c++)
+      for (int b = 0; b < kNWB; b++) wCount[c][b] = 0;
+   double wVal[3][kNWB];  // the weight each (class, bin) gets; filled after pass 0
+   for (int c = 0; c < 3; c++)
+      for (int b = 0; b < kNWB; b++) wVal[c][b] = 1.0;
+   Float_t wgt = 1.0;
+
    for (int c = 0; c < 3; c++) {
       t[c] = new TTree(clsname[c], clsname[c]);
       for (int i = 0; i < NVAR; i++)
          t[c]->Branch(varname[i], &v[i], Form("%s/F", varname[i]));
       t[c]->Branch("isTest", &isTest, "isTest/F");
+      t[c]->Branch("w", &wgt, "w/F");
    }
 
    const int half = NW / 2;
@@ -169,6 +226,18 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
       vmin[i] = 1e30;
       vmax[i] = -1e30;
    }
+
+   // With weightMode = 1 the clusters are read TWICE: pass 0 only counts them
+   // per (class, energy bin), pass 1 fills the trees with the weights that
+   // count implies. Everything else - cuts, labels, features - is identical in
+   // the two passes, so the weights describe exactly the clusters that are
+   // trained on. Unweighted, pass 1 runs alone.
+   long nEventsSeen = 0;
+   for (int pass = (weightMode == 1 ? 0 : 1); pass < 2; pass++) {
+   const bool counting = (pass == 0);
+   StFcsTrainTestSplit::EventSplitter splitter;
+   nBelowE = nNoTruth = nImpure = nNoTowers = nNotSample = 0;
+   for (int c = 0; c < 3; c++) kept[c] = keptTest[c] = 0;
 
    for (Long64_t i = 0; i < n; i++) {
       in->GetEntry(i);
@@ -243,14 +312,98 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
          nNoTowers++;
          continue;
       }
+      // which energy bin this cluster belongs to
+      int eb = 0;
+      while (eb < kNWB - 1 && e >= wEdge[eb + 1]) eb++;
+      if (counting) {
+         wCount[cls][eb] += 1;
+         continue;
+      }
       for (int i = 0; i < NVAR; i++) {
          if (v[i] < vmin[i]) vmin[i] = v[i];
          if (v[i] > vmax[i]) vmax[i] = v[i];
       }
+      wgt = (weightMode == 1) ? (Float_t)wVal[cls][eb] : 1.0f;
       t[cls]->Fill();
       kept[cls]++;
       if (isTest > 0.5) keptTest[cls]++;
    }
+   nEventsSeen = splitter.nEvents();
+
+   // ---- end of the counting pass: turn the counts into weights ----
+   if (counting) {
+      printf("\n--- flat-in-energy training weights (bins of CLUSTER energy) ---\n");
+      printf("  %-11s %8s %9s %9s %9s %7s %7s\n", "class", "clusters", "bins used", "min w", "max w",
+             "merged", "capped");
+      for (int c = 0; c < 3; c++) {
+         // merge a bin with too few clusters into the next one up, so a
+         // handful of clusters cannot become a huge weight
+         double nEff[kNWB];
+         int owner[kNWB];  // which bin a cluster of this bin is counted in
+         for (int b = 0; b < kNWB; b++) {
+            nEff[b] = wCount[c][b];
+            owner[b] = b;
+         }
+         int nMerged = 0;
+         for (int b = 0; b < kNWB - 1; b++) {
+            if (nEff[b] <= 0 || nEff[b] >= kMinBin) continue;
+            nEff[b + 1] += nEff[b];
+            nEff[b] = 0;
+            for (int q = 0; q <= b; q++)
+               if (owner[q] == b) owner[q] = b + 1;
+            nMerged++;
+         }
+         // the last bin cannot merge upward: fold it downward instead
+         if (nEff[kNWB - 1] > 0 && nEff[kNWB - 1] < kMinBin) {
+            for (int b = kNWB - 2; b >= 0; b--) {
+               if (nEff[b] <= 0) continue;
+               nEff[b] += nEff[kNWB - 1];
+               nEff[kNWB - 1] = 0;
+               for (int q = 0; q < kNWB; q++)
+                  if (owner[q] == kNWB - 1) owner[q] = b;
+               nMerged++;
+               break;
+            }
+         }
+         double total = 0;
+         int nUsed = 0;
+         for (int b = 0; b < kNWB; b++) {
+            total += nEff[b];
+            if (nEff[b] > 0) nUsed++;
+         }
+         if (total <= 0 || nUsed == 0) continue;
+         // equal total weight in every populated bin, mean weight 1
+         std::vector<double> ws;
+         for (int b = 0; b < kNWB; b++) {
+            const double nb = nEff[owner[b]];
+            wVal[c][b] = (nb > 0) ? (total / nUsed) / nb : 1.0;
+            if (wCount[c][b] > 0) ws.push_back(wVal[c][b]);
+         }
+         std::sort(ws.begin(), ws.end());
+         const double med = ws.empty() ? 1.0 : ws[ws.size() / 2];
+         int nCap = 0;
+         double lo = 1e30, hi = 0;
+         for (int b = 0; b < kNWB; b++) {
+            if (wCount[c][b] <= 0) continue;
+            if (wVal[c][b] > kWCap * med) {
+               wVal[c][b] = kWCap * med;
+               nCap++;
+            }
+            if (wVal[c][b] < lo) lo = wVal[c][b];
+            if (wVal[c][b] > hi) hi = wVal[c][b];
+         }
+         // renormalise so the average weight of this class is 1, which keeps
+         // TMVA's own NormMode doing what it did before
+         double sw = 0;
+         for (int b = 0; b < kNWB; b++) sw += wCount[c][b] * wVal[c][b];
+         const double scale = (sw > 0) ? (total / sw) : 1.0;
+         for (int b = 0; b < kNWB; b++) wVal[c][b] *= scale;
+         printf("  %-11s %8.0f %9d %9.3g %9.3g %7d %7d\n", clsname[c], total, nUsed, lo * scale, hi * scale,
+                nMerged, nCap);
+      }
+      printf("  a class whose clusters all sit in one energy bin gets weight 1 everywhere\n");
+   }
+   }  // pass
    // ------------------------------------------------------------ accounting
    printf("\n--- where the %lld clusters in %s went ---\n", n, infile);
    printf("  below eMin = %.2f GeV        : %lld\n", eMin, nBelowE);
@@ -261,8 +414,9 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
       printf("  not a training class (labelDef=1: resolved pi0 photon, fragment, other gun): %lld\n", nNotSample);
    printf("  KEPT  other=%lld  1photon=%lld  2photon=%lld\n", kept[0], kept[1], kept[2]);
    printf("  split by event (%ld events): train %lld / %lld / %lld, test %lld / %lld / %lld\n",
-          splitter.nEvents(), kept[0] - keptTest[0], kept[1] - keptTest[1], kept[2] - keptTest[2],
+          nEventsSeen, kept[0] - keptTest[0], kept[1] - keptTest[1], kept[2] - keptTest[2],
           keptTest[0], keptTest[1], keptTest[2]);
+   if (weightMode == 1) printf("  training weights: flat in cluster energy (see the table above)\n");
    printf("  label source: %s\n", labelDef == 1 ? "generated particle (genPid), cleaned with mcLabel"
                                  : haveMcBranch  ? "mcLabel (generator level)"
                                                  : "truthNPhoton (hit level); no mcLabel branch");
@@ -313,7 +467,7 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
          printf("\nThe train/test split put every '%s' cluster on one side.\n", clsname[c]);
          printf("It splits by event, using the run and event branches, and found only\n");
          printf("%ld event(s) in %lld clusters - those branches are probably not filled.\n",
-                splitter.nEvents(), n);
+                nEventsSeen, n);
          printf("Stopping before TMVA.\n");
          ftmp->Close();
          return;
@@ -386,6 +540,8 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
       factory->AddTree(t[c], clsname[c], 1.0, TCut("isTest<0.5"), TMVA::Types::kTraining);
       factory->AddTree(t[c], clsname[c], 1.0, TCut("isTest>0.5"), TMVA::Types::kTesting);
    }
+   if (weightMode == 1)
+      for (int c = 0; c < 3; c++) factory->SetWeightExpression("w", clsname[c]);
    factory->PrepareTrainingAndTestTree("", "NormMode=NumEvents:!V");
    factory->BookMethod(TMVA::Types::kBDT, "BDTG",
                        "!H:!V:NTrees=600:MaxDepth=4:BoostType=Grad:Shrinkage=0.10:"
