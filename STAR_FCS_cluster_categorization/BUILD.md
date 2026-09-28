@@ -562,14 +562,31 @@ onePhoton / twoPhoton):
 | `logE` – `nTowers` | 0.81 / 0.83 / 0.82 | physical |
 
 **The detector-frame moments are not duplicates after all.** The algebra above
-assumes both descriptions use the same weights, and they do not:
-`StFcsClusterMaker::clusterMomentAnalysis()` uses *logarithmic* weights
-`w = log(E + 1 − 0.1 GeV)` on sub-cell positions in cm and drops towers below
-0.1 GeV, while `sigX`/`sigY`/`sigXY` here use *linear* energy weights on integer
-tower centres and keep every tower. Log weights follow the shower tail, energy
-weights follow its core. Two different estimators of the same shape, so set 13
-is carrying more information than the algebra suggested — which is consistent
-with set 13 beating set 3 on merged π⁰ by 17 points.
+assumes both descriptions are built the same way. They are not. Four differences,
+in order of importance:
+
+1. **Weighting.** `StFcsClusterMaker::clusterMomentAnalysis()` weights each tower
+   by `w = log(E + 1 − 0.1 GeV)`; `sigX`/`sigY`/`sigXY` weight by E itself. Log
+   weights follow the shower tail, energy weights follow the core. This is the
+   dominant difference and the reason the two are only 0.4–0.6 correlated.
+2. **Threshold.** STAR drops towers with `w ≤ 0`, i.e. below 0.1 GeV; we keep
+   every tower in the list we are given.
+3. **Tower list.** On picoDst the list is not stored, so `StFcsTowerAssoc`
+   rebuilds it — 92 % exact tower count, median energy difference zero, but not
+   the original. STAR's `sigmaMax`/`sigmaMin` come from the original list, before
+   picoDst threw it away. On MuDst our list is exact and this difference vanishes.
+4. **Window.** The tree stores an 11×11 tower image around the seed, so a tower
+   further than 5 cells from the seed is not in our sum. Rare for real clusters,
+   but not impossible for a large hadronic one.
+
+Positions are *not* a difference: `getLocalXYinCell` returns `col − 0.5`,
+`row − 0.5` for the ECal — tower centres in cell units, the same geometry we use,
+and a constant offset does not change a variance.
+
+So the two are different estimators of the same shape, and set 13 carries more
+information than the algebra suggested — consistent with set 13 beating set 3 on
+merged π⁰ by 17 points. Point 3 also means the correlation is sample-dependent:
+measure it again on a MuDst dump and expect it to rise.
 
 **Set 10 is therefore a control, not an obvious cleanup.** Still worth one
 training run: it measures what the energy-weighted moments add once the
