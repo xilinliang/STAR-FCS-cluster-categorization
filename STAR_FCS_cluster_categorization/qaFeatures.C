@@ -523,12 +523,19 @@ void qaFeatures(const char* infile = "feat_pico.root",
          hc->GetYaxis()->SetLabelSize(0.035);
          cv->Clear();
          cv->cd();
+         // The canvas still carries SetLogz from the sigmaMax-vs-E page, and a
+         // log z axis silently drops every NEGATIVE correlation - which is half
+         // of what this matrix is for. Turn it off explicitly, and print the
+         // numbers as integers rather than with six digits.
+         gPad->SetLogz(0);
+         gStyle->SetPaintTextFormat("4.0f");
          gPad->SetLeftMargin(0.17);
          gPad->SetRightMargin(0.13);
          gPad->SetBottomMargin(0.16);
          hc->Draw("colz text");
          keep.push_back(hc);
          cv->Print(pdf);
+         gStyle->SetPaintTextFormat("g");
       }
 
       // ---- distributions per true class, 8 variables per page ----
