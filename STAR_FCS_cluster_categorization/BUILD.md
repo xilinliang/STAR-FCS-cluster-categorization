@@ -512,6 +512,40 @@ bins keeps a larger share where it does live. Where a class is absent entirely �
 merged π⁰ below ~10 GeV — nothing is done, and nothing should be: that is
 kinematics.
 
+### Set 10: is the detector frame worth its correlation?
+
+Set 13 carries both `sigmaMax`/`sigmaMin`/`theta` and `sigX`/`sigY`/`sigXY`. Those
+are the eigenvalues-and-angle and the components of **one** covariance matrix:
+
+```
+sigX²  = σmax²·cos²θ + σmin²·sin²θ
+sigY²  = σmax²·sin²θ + σmin²·cos²θ
+sigXY  = (σmax² − σmin²)·sinθ·cosθ
+```
+
+so six numbers describe three degrees of freedom and the extra three add no
+information. What they can still buy is a frame: a boosted tree cuts one variable
+at a time and cannot rotate, so "wide along the row direction" is one cut on
+`sigY` but a joint condition on `sigmaMax` and `theta`. The cost is real too —
+correlated inputs mislead the TMVA ranking and gave the MLP its singular Hessian.
+
+**Set 10** is set 13 with those three removed, everything else unchanged and in
+the same order. Train both on the same file and let the data decide:
+
+```csh
+root4star -b -q 'trainTMVA.C+("feat_pico_all.root","FcsCat",10,"clusters",0.8,0.5,1,1)'
+root4star -b -q 'evalCategory.C+("feat_pico_all.root","weights/FcsCat10genw_BDTG.weights.xml",10,"BDTG",1,"",0.5,0.8,"clusters",1,1)'
+root4star -b -q 'compareModels.C+("evalFcsCat13genw_BDTG.root","set 13","evalFcsCat10genw_BDTG.root","set 10")'
+```
+
+Reading the outcome: a tie means drop the three and keep the smaller model; BDTG
+losing while MLP does not means the frame argument is real and set 13 stays for
+BDTG; both losing means the moments are doing something we have not understood.
+The correlation matrix TMVA prints at the start of training is worth a look first
+— `sigX` against `sigmaMax` above ~0.95 is the reason to run this test at all.
+
+Feature files need no change: the sets are computed from the same stored tree.
+
 ### Comparing models
 
 `compareModels.C` reads the `.root` files `evalCategory.C` already wrote and puts

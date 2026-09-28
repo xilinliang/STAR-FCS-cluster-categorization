@@ -168,6 +168,57 @@ int testFeatures() {
       check(compute(3, noTowers, t3) == 0, "set 3 refuses with no tower list (not usable on picoDst)");
    }
 
+   // set 10: set 13 with sigX, sigY and sigXY removed. Every other variable
+   // must be bit-for-bit what set 13 gives, in the same order, or a set-10
+   // model is not comparable with a set-13 one.
+   {
+      float a10[kNVarMax], a13[kNVarMax], b10[kNVarMax], b13[kNVarMax];
+      const int n10a = compute(10, c1, a10);
+      compute(13, c1, a13);
+      const int n10b = compute(10, c2, b10);
+      compute(13, c2, b13);
+      printf("checks, feature set 10 (set 13 without the detector-frame moments):\n");
+      check(n10a == 10 && n10b == 10, "set 10 returns 10 variables");
+      bool same = true;
+      for (int i = 0; i < 9; i++) {
+         if (fabs(a10[i] - a13[i]) > 1e-6 || fabs(b10[i] - b13[i]) > 1e-6) same = false;
+         if (strcmp(varNames(10)[i], varNames(13)[i]) != 0) same = false;
+      }
+      check(same, "first nine variables identical to set 13, values and names");
+      check(fabs(a10[9] - a13[12]) < 1e-6 && strcmp(varNames(10)[9], "nNeighbor") == 0,
+            "last variable is nNeighbor, as in set 13");
+      bool noMoments = true;
+      for (int i = 0; i < 10; i++)
+         if (strcmp(varNames(10)[i], "sigX") == 0 || strcmp(varNames(10)[i], "sigY") == 0 ||
+             strcmp(varNames(10)[i], "sigXY") == 0)
+            noMoments = false;
+      check(noMoments, "sigX, sigY and sigXY are gone");
+      // The algebra behind calling the three moments redundant: diagonalise
+      // the covariance matrix they form, then rebuild them from its
+      // eigenvalues and angle. If that round-trip works, (sigX, sigY, sigXY)
+      // and (major axis, minor axis, angle) are the same three numbers in two
+      // frames. NOTE this is OUR matrix, not STAR's sigmaMax/sigmaMin: those
+      // come from StFcsClusterMaker's own moment analysis in cm, which this
+      // synthetic test only mocks up, so they cannot be compared here - that
+      // comparison belongs in qaFeatures.C on a real file.
+      const double vx = b13[9] * b13[9], vy = b13[10] * b13[10], vxy = b13[11];
+      const double tr = vx + vy, dsc = sqrt((vx - vy) * (vx - vy) + 4 * vxy * vxy);
+      const double l1 = 0.5 * (tr + dsc), l2 = 0.5 * (tr - dsc);
+      const double ang = 0.5 * atan2(2 * vxy, vx - vy);
+      const double vxBack = l1 * cos(ang) * cos(ang) + l2 * sin(ang) * sin(ang);
+      const double vyBack = l1 * sin(ang) * sin(ang) + l2 * cos(ang) * cos(ang);
+      check(l1 >= l2 && l2 >= -1e-9, "the covariance matrix is positive semi-definite");
+      check(fabs(vxBack - vx) < 1e-6 * (1 + vx) && fabs(vyBack - vy) < 1e-6 * (1 + vy),
+            "sigX/sigY/sigXY rebuild exactly from their own eigenvalues and angle");
+      float t10[kNVarMax];
+      ClusterInput noTowers = c1;
+      noTowers.nTow = 0;
+      noTowers.towerE = 0;
+      noTowers.towerRow = 0;
+      noTowers.towerCol = 0;
+      check(compute(10, noTowers, t10) == 0, "set 10 refuses with no tower list, like set 13");
+   }
+
    float a[kNVarMax], b[kNVarMax];
    compute(13, c1, a);
    compute(13, c2, b);

@@ -14,6 +14,23 @@
 //        logE nTowers sigmaMax sigmaMin sigmaRatio theta
 //        seedFrac e2Frac e1e2Asym sigX sigY sigXY nNeighbor
 //
+//   10 - set 13 without the three detector-frame moments:
+//        logE nTowers sigmaMax sigmaMin sigmaRatio theta
+//        seedFrac e2Frac e1e2Asym nNeighbor
+//      sigX, sigY and sigXY are the components of the SAME covariance matrix
+//      whose eigenvalues and angle are sigmaMax, sigmaMin and theta:
+//        sigX^2 = smax^2 cos^2(th) + smin^2 sin^2(th)
+//        sigY^2 = smax^2 sin^2(th) + smin^2 cos^2(th)
+//        sigXY  = (smax^2 - smin^2) sin(th) cos(th)
+//      so set 13 describes three degrees of freedom with six numbers and set
+//      10 carries exactly the same information. What the extra three can still
+//      buy is a FRAME: a boosted tree cuts one variable at a time and cannot
+//      rotate, so "wide along the row direction" is one cut on sigY but a joint
+//      condition on sigmaMax and theta. Whether that is worth the correlation -
+//      which misleads the TMVA ranking and gives the MLP a singular Hessian -
+//      is a question for the data, not for an argument: train 10 and 13 on the
+//      same file and compare with compareModels.C.
+//
 //   34 (ePIC-style):
 //        e x y nHits radius dispersion sigmaMin sigmaMax
 //        t00..t44 (5x5 tower energies around the seed) eOut
@@ -54,7 +71,8 @@ const double kW0 = 4.5;
 inline int nVar(int set) {
    if (set == 34) return 34;
    if (set == 6) return 6;
-   if (set == 3) return 13;  // 9 tower energies + e + sigmaMax + sigmaMin + seedFrac
+   if (set == 10) return 10;  // set 13 minus sigX, sigY, sigXY
+   if (set == 3) return 13;   // 9 tower energies + e + sigmaMax + sigmaMin + seedFrac
    return 13;
 }
 
@@ -73,6 +91,11 @@ inline const char** varNames(int set) {
    static const char* n13[13] = {"logE",     "nTowers", "sigmaMax", "sigmaMin", "sigmaRatio",
                                  "theta",    "seedFrac", "e2Frac",  "e1e2Asym", "sigX",
                                  "sigY",     "sigXY",   "nNeighbor"};
+   // set 10: set 13 with the three detector-frame moments removed. The order
+   // of what remains is unchanged, so a set-10 model is a set-13 model with
+   // three inputs deleted - nothing else moves.
+   static const char* n10[10] = {"logE",     "nTowers", "sigmaMax", "sigmaMin", "sigmaRatio",
+                                 "theta",    "seedFrac", "e2Frac",  "e1e2Asym", "nNeighbor"};
    static const char* n34[34] = {"e",   "x",   "y",   "nHits", "radius", "dispersion", "sigmaMin",
                                  "sigmaMax",
                                  "t00", "t01", "t02", "t03", "t04",
@@ -83,6 +106,7 @@ inline const char** varNames(int set) {
                                  "eOut"};
    if (set == 34) return n34;
    if (set == 6) return n6;
+   if (set == 10) return n10;
    if (set == 3) return n3;
    return n13;
 }
@@ -179,7 +203,10 @@ inline int compute(int set, const ClusterInput& c, float* out) {
    }
 
    if (set != 34) {
-      // --------------------------------------------------------------- 13
+      // ----------------------------------------------------------- 13 / 10
+      // The two sets share every definition; set 10 simply stops before the
+      // detector-frame moments and puts nNeighbor in their place.
+      const bool wantMoments = (set != 10);
       double e1 = -1, e2 = -1;
       double wtot = 0, sx = 0, sy = 0, sxy = 0, mx = 0, my = 0;
       for (int k = 0; k < c.nTow; k++) {
@@ -214,6 +241,10 @@ inline int compute(int set, const ClusterInput& c, float* out) {
       out[6] = e1 / c.e;
       out[7] = e2 / c.e;
       out[8] = (e1 + e2 > 0) ? (e1 - e2) / (e1 + e2) : 1.0;
+      if (!wantMoments) {
+         out[9] = c.nNeighbor;
+         return 10;
+      }
       out[9] = sqrt(fabs(sx / wtot - mx * mx));
       out[10] = sqrt(fabs(sy / wtot - my * my));
       out[11] = sxy / wtot - mx * my;
