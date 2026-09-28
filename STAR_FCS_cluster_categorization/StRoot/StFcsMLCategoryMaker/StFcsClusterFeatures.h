@@ -22,14 +22,23 @@
 //        sigX^2 = smax^2 cos^2(th) + smin^2 sin^2(th)
 //        sigY^2 = smax^2 sin^2(th) + smin^2 cos^2(th)
 //        sigXY  = (smax^2 - smin^2) sin(th) cos(th)
-//      so set 13 describes three degrees of freedom with six numbers and set
-//      10 carries exactly the same information. What the extra three can still
-//      buy is a FRAME: a boosted tree cuts one variable at a time and cannot
-//      rotate, so "wide along the row direction" is one cut on sigY but a joint
-//      condition on sigmaMax and theta. Whether that is worth the correlation -
-//      which misleads the TMVA ranking and gives the MLP a singular Hessian -
-//      is a question for the data, not for an argument: train 10 and 13 on the
-//      same file and compare with compareModels.C.
+//      ON PAPER. In practice they are NOT the same numbers, and the measured
+//      correlations say so: sigX vs sigmaMax is only 0.42 - 0.60 depending on
+//      the class, sigY vs sigmaMax 0.44 - 0.65, sigXY vs theta 0.28 - 0.48.
+//      The reason is the weighting. StFcsClusterMaker::clusterMomentAnalysis()
+//      uses LOGARITHMIC weights, w = log(E + 1 - 0.1 GeV), on sub-cell
+//      positions in cm from getLocalXYinCell, and drops towers below 0.1 GeV;
+//      the moments here use LINEAR energy weights on integer tower centres and
+//      keep every tower. Log weights follow the shower tail, energy weights
+//      follow its core, so the two are different estimators of the same shape,
+//      not one estimator in two frames.
+//
+//      So set 10 is a CONTROL, not an obvious cleanup: it asks what the
+//      energy-weighted moments are worth once the log-weighted ones are there.
+//      The pairs that really are redundant in set 13 are elsewhere -
+//      e1e2Asym against seedFrac and e2Frac (0.80 to 0.98; it is an exact
+//      function of them) and sigmaRatio against sigmaMin (0.86 to 0.94).
+//      Train 10 and 13 on the same file and compare with compareModels.C.
 //
 //   34 (ePIC-style):
 //        e x y nHits radius dispersion sigmaMin sigmaMax

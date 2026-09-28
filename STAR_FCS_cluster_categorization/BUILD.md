@@ -546,11 +546,40 @@ root4star -b -q 'compareModels.C+("evalFcsCat13genw_BDTG.root","set 13","evalFcs
 Reading the outcome: a tie means drop the three and keep the smaller model; BDTG
 losing while MLP does not means the frame argument is real and set 13 stays for
 BDTG; both losing means the moments are doing something we have not understood.
-Look at the correlations first. Two places show them without training anything:
-`grep -A 20 "Correlation matrix" logTMVA13.log` in an existing training log, or the
-correlation page `qaFeatures.C` now writes for each set (`./runQA.sh <file>`).
-`sigX` against `sigmaMax` above ~0.95 is the reason to run this test at all; well
-below that, the two frames are seeing different things and set 13 probably stays.
+#### What the measured correlations say
+
+Measured on the γ + π⁰ + π⁻ sample (TMVA's own matrix, per class — other /
+onePhoton / twoPhoton):
+
+| pair | correlation | |
+|---|---|---|
+| `sigX` – `sigmaMax` | 0.48 / 0.42 / 0.60 | moderate |
+| `sigY` – `sigmaMax` | 0.53 / 0.44 / 0.65 | moderate |
+| `sigXY` – `theta` | 0.28 / 0.34 / 0.48 | weak |
+| `e1e2Asym` – `e2Frac` | −0.89 / −0.98 / −0.94 | **redundant** |
+| `e1e2Asym` – `seedFrac` | 0.80 / 0.96 / 0.90 | **redundant** |
+| `sigmaRatio` – `sigmaMin` | 0.92 / 0.94 / 0.86 | **near-redundant** |
+| `logE` – `nTowers` | 0.81 / 0.83 / 0.82 | physical |
+
+**The detector-frame moments are not duplicates after all.** The algebra above
+assumes both descriptions use the same weights, and they do not:
+`StFcsClusterMaker::clusterMomentAnalysis()` uses *logarithmic* weights
+`w = log(E + 1 − 0.1 GeV)` on sub-cell positions in cm and drops towers below
+0.1 GeV, while `sigX`/`sigY`/`sigXY` here use *linear* energy weights on integer
+tower centres and keep every tower. Log weights follow the shower tail, energy
+weights follow its core. Two different estimators of the same shape, so set 13
+is carrying more information than the algebra suggested — which is consistent
+with set 13 beating set 3 on merged π⁰ by 17 points.
+
+**Set 10 is therefore a control, not an obvious cleanup.** Still worth one
+training run: it measures what the energy-weighted moments add once the
+log-weighted ones are present. Expect a small loss, not a tie.
+
+**The real duplicates are elsewhere.** `e1e2Asym = (e1−e2)/(e1+e2)` is an exact
+function of `seedFrac = e1/E` and `e2Frac = e2/E`, and the matrix shows it at 0.96
+and −0.98 for one-photon clusters. `sigmaRatio = sigmaMin/sigmaMax` tracks
+`sigmaMin` at 0.94. If the goal is a smaller, better-ranked set, those two are the
+ones to drop — a variant worth adding if the set-10 test comes out as expected.
 
 Feature files need no change: the sets are computed from the same stored tree.
 
