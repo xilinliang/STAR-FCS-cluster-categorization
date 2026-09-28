@@ -20,11 +20,14 @@
 //                   (north, south), nTowers, nNeighbor, FCS Cluster category,
 //                   true class
 //     page 2        sigmaMax vs energy with STAR's category boundaries drawn on
-//     set 3 pages   every variable, split by true class (unit area), then
-//                   every variable against cluster energy (all clusters)
+//     set 3 pages   the linear correlation matrix of the inputs, then every
+//                   variable split by true class (unit area), then every
+//                   variable against cluster energy (all clusters)
 //     set 13 pages  the same for set 13
 //   <out>.root  every histogram
-//   printed     per set, a table per variable: entries, non-finite values,
+//   printed     per set, the correlation matrix (with the strongest pair
+//               flagged when it exceeds 95 %), and a table per variable:
+//               entries, non-finite values,
 //               min / max / mean / rms, the fraction sitting at the most
 //               common single value (a constant or near-constant variable
 //               is what makes TMVA abort with "Variable ... is constant"),
@@ -448,6 +451,84 @@ void qaFeatures(const char* infile = "feat_pico.root",
          if (rms == 0) printf("  <- CONSTANT: TMVA will abort");
          else if (topFrac > 95) printf("  <- nearly constant");
          printf("\n");
+      }
+
+      // ---- linear correlation between the inputs ----
+      //
+      // Two inputs correlated above ~0.95 carry one piece of information twice.
+      // That is not fatal - a BDT copes - but it makes the TMVA variable
+      // ranking meaningless and it is what gives an MLP a singular Hessian. In
+      // set 13, sigX/sigY/sigXY are the same covariance matrix as
+      // sigmaMax/sigmaMin/theta in another frame, so this table is the evidence
+      // for or against training set 10 instead. TMVA prints the same matrix
+      // when it trains; this is the cheap way to see it without training.
+      {
+         std::vector<double> mean(nv, 0.0), sd(nv, 0.0);
+         std::vector<long> ngood(nv, 0);
+         for (int a = 0; a < nv; a++) {
+            double s1 = 0, s2 = 0;
+            long ng = 0;
+            for (int i = 0; i < nClu; i++) {
+               const float x1 = val[s][a][i];
+               if (bad(x1)) continue;
+               s1 += x1;
+               s2 += (double)x1 * x1;
+               ng++;
+            }
+            ngood[a] = ng;
+            mean[a] = ng > 0 ? s1 / ng : 0;
+            sd[a] = ng > 0 ? sqrt(std::max(0.0, s2 / ng - mean[a] * mean[a])) : 0;
+         }
+         TH2F* hc = new TH2F(Form("hCorr_set%d", set), Form("set %d: linear correlation [%%];;", set), nv, 0,
+                             nv, nv, 0, nv);
+         printf("\n  linear correlation between the set %d inputs [%%]\n  %-11s", set, "");
+         for (int a = 0; a < nv; a++) printf(" %6.6s", names[a]);
+         printf("\n");
+         double worst = 0;
+         int wa = 0, wb = 0;
+         for (int a = 0; a < nv; a++) {
+            printf("  %-11s", names[a]);
+            for (int b2 = 0; b2 < nv; b2++) {
+               double cov = 0;
+               long ng = 0;
+               for (int i = 0; i < nClu; i++) {
+                  const float x1 = val[s][a][i], x2 = val[s][b2][i];
+                  if (bad(x1) || bad(x2)) continue;
+                  cov += ((double)x1 - mean[a]) * ((double)x2 - mean[b2]);
+                  ng++;
+               }
+               const double den = (ng > 0 && sd[a] > 0 && sd[b2] > 0) ? (ng * sd[a] * sd[b2]) : 0;
+               const double r = (den > 0) ? cov / den : (a == b2 ? 1.0 : 0.0);
+               printf(" %6.0f", 100 * r);
+               hc->SetBinContent(a + 1, b2 + 1, 100 * r);
+               if (a != b2 && fabs(r) > worst) {
+                  worst = fabs(r);
+                  wa = a;
+                  wb = b2;
+               }
+            }
+            printf("\n");
+            hc->GetXaxis()->SetBinLabel(a + 1, names[a]);
+            hc->GetYaxis()->SetBinLabel(a + 1, names[a]);
+         }
+         printf("  strongest pair: %s / %s at %.0f %%", names[wa], names[wb], 100 * worst);
+         if (worst > 0.95)
+            printf("  <- one piece of information twice\n");
+         else
+            printf("\n");
+         hc->SetMinimum(-100);
+         hc->SetMaximum(100);
+         hc->SetMarkerSize(1.2);
+         hc->GetXaxis()->SetLabelSize(0.035);
+         hc->GetYaxis()->SetLabelSize(0.035);
+         cv->Clear();
+         cv->cd();
+         gPad->SetLeftMargin(0.17);
+         gPad->SetRightMargin(0.13);
+         gPad->SetBottomMargin(0.16);
+         hc->Draw("colz text");
+         keep.push_back(hc);
+         cv->Print(pdf);
       }
 
       // ---- distributions per true class, 8 variables per page ----

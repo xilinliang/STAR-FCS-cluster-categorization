@@ -285,6 +285,11 @@ The energy axes end at the gun energy taken from the file name — the `e60` in
 0–60 GeV axis. With no such token the largest energy in the file is used, rounded
 up. A fourth argument overrides it: `./runQA.sh file.root -1 0.5 40`.
 
+Each set also gets a **linear correlation matrix**, printed and drawn: the cheap
+way to see whether two inputs carry the same information without training
+anything. The log flags the strongest pair when it exceeds 95 %. `sigX` against
+`sigmaMax` near 100 % is the motivation for feature set 10 (section 3).
+
 `qa_<name>.log` has the per-variable table — non-finite values, min/max/mean/rms,
 the share at the single most common value, and the mean per true class. A variable
 flagged `CONSTANT` is the one TMVA would abort on. On an existing feature file:
@@ -541,8 +546,11 @@ root4star -b -q 'compareModels.C+("evalFcsCat13genw_BDTG.root","set 13","evalFcs
 Reading the outcome: a tie means drop the three and keep the smaller model; BDTG
 losing while MLP does not means the frame argument is real and set 13 stays for
 BDTG; both losing means the moments are doing something we have not understood.
-The correlation matrix TMVA prints at the start of training is worth a look first
-— `sigX` against `sigmaMax` above ~0.95 is the reason to run this test at all.
+Look at the correlations first. Two places show them without training anything:
+`grep -A 20 "Correlation matrix" logTMVA13.log` in an existing training log, or the
+correlation page `qaFeatures.C` now writes for each set (`./runQA.sh <file>`).
+`sigX` against `sigmaMax` above ~0.95 is the reason to run this test at all; well
+below that, the two frames are seeing different things and set 13 probably stays.
 
 Feature files need no change: the sets are computed from the same stored tree.
 
