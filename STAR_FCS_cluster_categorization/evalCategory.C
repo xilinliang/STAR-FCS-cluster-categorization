@@ -8,7 +8,9 @@
 //
 // Output
 //   printed : confusion matrix, and per class the efficiency and purity with
-//             binomial errors, for the model and for STAR's catStar
+//             binomial errors, for the model and for STAR's catStar; and, for a
+//             FIXED-ENERGY sample (a handful of distinct gun energies rather
+//             than a spectrum), one row per energy point
 //   <out>.pdf  : confusion matrices; efficiency and purity vs cluster energy;
 //                two-photon efficiency vs photon separation; the model's score
 //                distributions per true class; and, if the feature file has the
@@ -92,6 +94,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <vector>
 
 #include "TCanvas.h"
@@ -440,6 +443,13 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    std::vector<float> featVal[kNVarMax];
    std::vector<int> featPart;
 
+   // Per GENERATED ENERGY POINT. A fixed-energy sample - pi0.e40..., gamma.e60...
+   // - has a handful of distinct gun energies instead of a spectrum, and then
+   // the natural summary is one row per energy point rather than a histogram.
+   // Keyed by the gun energy rounded to 0.5 GeV; if the file turns out to hold
+   // a continuous spectrum, there are too many keys and the table is skipped.
+   std::map<int, Confusion> byGenMl, byGenSt;
+
    // ------------------------------------------------------------ event loop
    Confusion ml, st;
    StFcsTrainTestSplit::EventSplitter splitter;
@@ -546,6 +556,12 @@ void evalCategory(const char* infile = "feat_pico_all.root",
          effSep_st->Fill(star == 2, mcSepCell);
       }
 
+      if (haveGen && genE > 0) {
+         const int key = (int)(genE * 2 + 0.5);  // 0.5 GeV granularity
+         byGenMl[key].c[truth][pred] += 1;
+         byGenSt[key].c[truth][star] += 1;
+      }
+
       // ---- per generated particle ----
       const int ps = haveGen ? partSlot(genPid) : -1;
       if (ps >= 0) {
@@ -602,6 +618,54 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    printf("\n  class mix of this sample: other %.1f%%  onePhoton %.1f%%  twoPhoton %.1f%%\n",
           100.0 * ml.rowSum(0) / nUsed, 100.0 * ml.rowSum(1) / nUsed, 100.0 * ml.rowSum(2) / nUsed);
    printf("  purity depends on that mix; efficiency and purity(balanced) do not\n");
+
+   // ---- per generated energy point (fixed-energy samples) ----
+   if (haveGen && !byGenMl.empty()) {
+      const int kMaxPoints = 16;
+      if ((int)byGenMl.size() > kMaxPoints) {
+         printf("\n  (continuous generated-energy spectrum: %d distinct values, so no\n"
+                "   per-energy-point table - the efficiency vs energy pages cover it)\n",
+                (int)byGenMl.size());
+      } else {
+         printf("\n=== per generated energy point ===\n");
+         printf("  %-10s %9s", "E_gen", "clusters");
+         for (int k = 0; k < 3; k++) printf(" %11s eff", kClsName[k]);
+         printf("   |");
+         for (int k = 1; k < 3; k++) printf(" %10s pur", kClsName[k]);
+         printf("\n");
+         for (std::map<int, Confusion>::const_iterator it = byGenMl.begin(); it != byGenMl.end(); ++it) {
+            const Confusion& m = it->second;
+            const double n = m.rowSum(0) + m.rowSum(1) + m.rowSum(2);
+            if (n <= 0) continue;
+            printf("  %7.1f    %9.0f", 0.5 * it->first, n);
+            for (int k = 0; k < 3; k++) {
+               if (m.rowSum(k) > 0)
+                  printf(" %11.3f    ", m.eff(k));
+               else
+                  printf(" %11s    ", "-");
+            }
+            printf("   |");
+            for (int k = 1; k < 3; k++) {
+               if (m.colSum(k) > 0)
+                  printf(" %10.3f    ", m.pur(k));
+               else
+                  printf(" %10s    ", "-");
+            }
+            printf("\n");
+         }
+         printf("  efficiency: of the true class-k clusters at this gun energy, the fraction called k\n");
+         printf("  purity: of the clusters called k at this gun energy, the fraction truly k\n");
+         printf("  (the %s category on the same clusters, one- and two-photon only)\n", kRefName);
+         for (std::map<int, Confusion>::const_iterator it = byGenSt.begin(); it != byGenSt.end(); ++it) {
+            const Confusion& m = it->second;
+            const double n = m.rowSum(0) + m.rowSum(1) + m.rowSum(2);
+            if (n <= 0) continue;
+            printf("  %7.1f    %9.0f %15s    ", 0.5 * it->first, n, "");
+            for (int k = 1; k < 3; k++) printf(" %11.3f    ", m.eff(k));
+            printf("\n");
+         }
+      }
+   }
 
    // ---- per generated particle ----
    int nPartUsed = 0;

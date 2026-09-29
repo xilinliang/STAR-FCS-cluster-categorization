@@ -615,6 +615,44 @@ efficiency bin by bin in photon separation with the cluster count per bin, then
 writes a three-page PDF. The inputs must be evaluations of the same feature file
 with the same `truthDef`; nothing checks that.
 
+### Fixed-energy samples, and how to mix them
+
+Single-particle guns at a few fixed energies (10, 20, 30, 40, 50, 60 GeV) are the
+efficient way to buy statistics exactly where they are missing — merged π⁰ above
+40 GeV, where the photons are less than a tower apart. But they should **not** be
+the whole training sample:
+
+- Set 13 uses `logE`, and a boosted tree cannot interpolate. Trained only at six
+  energies, it can learn energy-specific rules and behave oddly at 15 or 25 GeV —
+  which is what data contains.
+- Guns at ≥ 10 GeV produce almost no genuine low-energy photons, and low cluster
+  energy is where the model is already weakest.
+
+So keep a **continuous (flat) sample as the backbone** and add fixed-energy sets
+on top, weighted toward the high end; add 2 and 5 GeV points if the low-energy
+region matters. Keep `weightMode=1` — fixed-energy spikes make the spectrum very
+non-uniform, which is exactly what the flat-in-cluster-energy weights correct.
+
+`runTrainAll.sh` runs the whole chain over any list of files:
+
+```bash
+./runTrainAll.sh mix1 gamma.e{10,20,30,40,50,60}.vz0.all.picoDst.root \
+                      pi0.e{10,20,30,40,50,60}.vz0.all.picoDst.root \
+                      pi-.e{10,20,30,40,50,60}.vz0.all.picoDst.root \
+                      gamma.e60.vz0.all.picoDst.root pi0.e60.vz0.all.picoDst.root
+```
+
+It dumps each file (skipping any already dumped), `hadd`s them into
+`feat_<tag>.root`, runs the QA, trains with `labelDef=1 weightMode=1`, evaluates
+BDTG and MLP on both halves, and writes the BDTG-vs-MLP and train-vs-test
+comparisons. `FEATURESET=10 ./runTrainAll.sh ...` switches the feature set.
+
+When the sample has only a handful of distinct gun energies, `evalCategory.C`
+prints an extra table: efficiency and purity per class **at each energy point**,
+with the FCS Cluster category beneath it. That is the natural summary for a
+fixed-energy study, and it replaces reading points off the efficiency-vs-energy
+figure. With a continuous spectrum the table is skipped and the macro says so.
+
 ## 4. Apply
 
 **On MuDst** — the only place the categorization can change the physics, because
