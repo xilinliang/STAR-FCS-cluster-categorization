@@ -619,25 +619,61 @@ void evalCategory(const char* infile = "feat_pico_all.root",
           100.0 * ml.rowSum(0) / nUsed, 100.0 * ml.rowSum(1) / nUsed, 100.0 * ml.rowSum(2) / nUsed);
    printf("  purity depends on that mix; efficiency and purity(balanced) do not\n");
 
-   // ---- per generated energy point (fixed-energy samples) ----
+   // ---- per generated energy BAND (fixed-energy samples) ----
+   //
+   // A "40 GeV sample" is usually a narrow band, not a delta function - 38 to
+   // 42 GeV, say - so counting distinct gun energies finds dozens of values
+   // where a human sees six points. The bands are therefore found from the
+   // GAPS: consecutive populated 0.5 GeV slots belong to the same band, and a
+   // gap wider than kGapGeV starts a new one. A continuous spectrum has no
+   // gaps and collapses to a single band, which is reported rather than
+   // tabulated.
    if (haveGen && !byGenMl.empty()) {
-      const int kMaxPoints = 16;
-      if ((int)byGenMl.size() > kMaxPoints) {
-         printf("\n  (continuous generated-energy spectrum: %d distinct values, so no\n"
-                "   per-energy-point table - the efficiency vs energy pages cover it)\n",
-                (int)byGenMl.size());
+      const double kGapGeV = 1.5;  // a hole WIDER than this separates two bands
+      const int kMaxBands = 16;
+      std::vector<int> lo, hi;  // band edges, as map keys (0.5 GeV units)
+      int prev = -1000;
+      for (std::map<int, Confusion>::const_iterator it = byGenMl.begin(); it != byGenMl.end(); ++it) {
+         if (lo.empty() || (it->first - prev) > (int)(2 * kGapGeV + 0.5)) {
+            lo.push_back(it->first);
+            hi.push_back(it->first);
+         } else {
+            hi.back() = it->first;
+         }
+         prev = it->first;
+      }
+      const int nBand = (int)lo.size();
+      if (nBand > kMaxBands || (nBand == 1 && (hi[0] - lo[0]) > 20)) {
+         printf("\n  (the generated energy is a continuous spectrum over %.1f - %.1f GeV in\n"
+                "   %d band(s), so no per-band table - the efficiency vs energy pages cover it)\n",
+                0.5 * lo[0], 0.5 * hi[nBand - 1], nBand);
       } else {
-         printf("\n=== per generated energy point ===\n");
-         printf("  %-10s %9s", "E_gen", "clusters");
+         printf("\n=== per generated energy band ===\n");
+         printf("  %-16s %9s", "E_gen band", "clusters");
          for (int k = 0; k < 3; k++) printf(" %11s eff", kClsName[k]);
          printf("   |");
          for (int k = 1; k < 3; k++) printf(" %10s pur", kClsName[k]);
          printf("\n");
-         for (std::map<int, Confusion>::const_iterator it = byGenMl.begin(); it != byGenMl.end(); ++it) {
-            const Confusion& m = it->second;
-            const double n = m.rowSum(0) + m.rowSum(1) + m.rowSum(2);
-            if (n <= 0) continue;
-            printf("  %7.1f    %9.0f", 0.5 * it->first, n);
+         for (int b = 0; b < nBand; b++) {
+            Confusion m, ms;
+            double eSum = 0, nSum = 0;
+            for (std::map<int, Confusion>::const_iterator it = byGenMl.begin(); it != byGenMl.end(); ++it) {
+               if (it->first < lo[b] || it->first > hi[b]) continue;
+               const double n = it->second.rowSum(0) + it->second.rowSum(1) + it->second.rowSum(2);
+               eSum += 0.5 * it->first * n;
+               nSum += n;
+               for (int i = 0; i < 3; i++)
+                  for (int j = 0; j < 3; j++) m.c[i][j] += it->second.c[i][j];
+            }
+            for (std::map<int, Confusion>::const_iterator it = byGenSt.begin(); it != byGenSt.end(); ++it) {
+               if (it->first < lo[b] || it->first > hi[b]) continue;
+               for (int i = 0; i < 3; i++)
+                  for (int j = 0; j < 3; j++) ms.c[i][j] += it->second.c[i][j];
+            }
+            if (nSum <= 0) continue;
+            char band[32];
+            snprintf(band, sizeof(band), "%.0f-%.0f (<%.1f>)", 0.5 * lo[b], 0.5 * hi[b], eSum / nSum);
+            printf("  %-16s %9.0f", band, nSum);
             for (int k = 0; k < 3; k++) {
                if (m.rowSum(k) > 0)
                   printf(" %11.3f    ", m.eff(k));
@@ -652,18 +688,15 @@ void evalCategory(const char* infile = "feat_pico_all.root",
                   printf(" %10s    ", "-");
             }
             printf("\n");
-         }
-         printf("  efficiency: of the true class-k clusters at this gun energy, the fraction called k\n");
-         printf("  purity: of the clusters called k at this gun energy, the fraction truly k\n");
-         printf("  (the %s category on the same clusters, one- and two-photon only)\n", kRefName);
-         for (std::map<int, Confusion>::const_iterator it = byGenSt.begin(); it != byGenSt.end(); ++it) {
-            const Confusion& m = it->second;
-            const double n = m.rowSum(0) + m.rowSum(1) + m.rowSum(2);
-            if (n <= 0) continue;
-            printf("  %7.1f    %9.0f %15s    ", 0.5 * it->first, n, "");
-            for (int k = 1; k < 3; k++) printf(" %11.3f    ", m.eff(k));
+            // the reference category on the same clusters, one- and two-photon only
+            printf("  %-16s %9s %11s    ", "   FCS Cluster", "", "");
+            for (int k = 1; k < 3; k++)
+               printf(" %11.3f    ", ms.rowSum(k) > 0 ? ms.eff(k) : 0.0);
             printf("\n");
          }
+         printf("  rows: the model; the line under each is the %s category on the same clusters\n", kRefName);
+         printf("  efficiency: of the true class-k clusters in this band, the fraction called k\n");
+         printf("  purity: of the clusters called k in this band, the fraction truly k\n");
       }
    }
 

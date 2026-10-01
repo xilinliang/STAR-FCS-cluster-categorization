@@ -647,11 +647,14 @@ It dumps each file (skipping any already dumped), `hadd`s them into
 BDTG and MLP on both halves, and writes the BDTG-vs-MLP and train-vs-test
 comparisons. `FEATURESET=10 ./runTrainAll.sh ...` switches the feature set.
 
-When the sample has only a handful of distinct gun energies, `evalCategory.C`
-prints an extra table: efficiency and purity per class **at each energy point**,
-with the FCS Cluster category beneath it. That is the natural summary for a
-fixed-energy study, and it replaces reading points off the efficiency-vs-energy
-figure. With a continuous spectrum the table is skipped and the macro says so.
+`evalCategory.C` prints an extra table for such a sample: efficiency and purity
+per class **per energy band**, with the FCS Cluster category on the line beneath.
+The bands are found from the gaps in the generated energy — consecutive populated
+0.5 GeV slots are one band, a hole wider than 1.5 GeV starts the next — so a
+"40 GeV sample" generated as 38–42 GeV is recognised as one point, not as dozens
+of distinct energies. A continuous spectrum has no gaps, collapses to a single
+band, and is reported rather than tabulated. Evaluate a points-only merge (no
+flat sample in it) to get the table.
 
 ## 4. Apply
 
