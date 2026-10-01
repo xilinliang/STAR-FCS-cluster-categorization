@@ -688,10 +688,15 @@ void evalCategory(const char* infile = "feat_pico_all.root",
                   printf(" %10s    ", "-");
             }
             printf("\n");
-            // the reference category on the same clusters, one- and two-photon only
+            // the reference category on the same clusters, one- and two-photon
+            // only, with ITS purity too - a high efficiency at low energy means
+            // little if everything else is called a photon as well
             printf("  %-16s %9s %11s    ", "   FCS Cluster", "", "");
             for (int k = 1; k < 3; k++)
                printf(" %11.3f    ", ms.rowSum(k) > 0 ? ms.eff(k) : 0.0);
+            printf("   |");
+            for (int k = 1; k < 3; k++)
+               printf(" %10.3f    ", ms.colSum(k) > 0 ? ms.pur(k) : 0.0);
             printf("\n");
          }
          printf("  rows: the model; the line under each is the %s category on the same clusters\n", kRefName);
