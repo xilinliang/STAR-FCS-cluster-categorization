@@ -168,6 +168,35 @@ int testFeatures() {
       check(compute(3, noTowers, t3) == 0, "set 3 refuses with no tower list (not usable on picoDst)");
    }
 
+   // set 4: set 3 with the cluster position appended. The first thirteen must
+   // be bit-for-bit set 3, or a set-4 model cannot be compared with a set-3 one.
+   {
+      float a3[kNVarMax], a4[kNVarMax], b3[kNVarMax], b4[kNVarMax];
+      compute(3, c1, a3);
+      const int n4a = compute(4, c1, a4);
+      compute(3, c2, b3);
+      const int n4b = compute(4, c2, b4);
+      printf("checks, feature set 4 (set 3 plus position):\n");
+      check(n4a == 15 && n4b == 15, "set 4 returns 15 variables");
+      bool same = true;
+      for (int i = 0; i < 13; i++) {
+         if (fabs(a4[i] - a3[i]) > 1e-6 || fabs(b4[i] - b3[i]) > 1e-6) same = false;
+         if (strcmp(varNames(4)[i], varNames(3)[i]) != 0) same = false;
+      }
+      check(same, "first thirteen variables identical to set 3, values and names");
+      check(fabs(a4[13] - c1.x) < 1e-6 && fabs(a4[14] - c1.y) < 1e-6,
+            "x and y are the cluster centroid");
+      check(strcmp(varNames(4)[13], "x") == 0 && strcmp(varNames(4)[14], "y") == 0,
+            "the two added names are x and y");
+      float t4[kNVarMax];
+      ClusterInput noTowers = c1;
+      noTowers.nTow = 0;
+      noTowers.towerE = 0;
+      noTowers.towerRow = 0;
+      noTowers.towerCol = 0;
+      check(compute(4, noTowers, t4) == 0, "set 4 refuses with no tower list, like set 3");
+   }
+
    // set 10: set 13 with sigX, sigY and sigXY removed. Every other variable
    // must be bit-for-bit what set 13 gives, in the same order, or a set-10
    // model is not comparable with a set-13 one.

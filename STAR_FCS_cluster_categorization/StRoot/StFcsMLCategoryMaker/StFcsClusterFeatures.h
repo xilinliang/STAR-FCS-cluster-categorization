@@ -8,11 +8,46 @@
 // Header-only and free of any STAR or ROOT dependency, so a ROOT macro can
 // simply #include it.
 //
-// Two feature sets:
+// Feature sets (the id names the window or the lineage, not the variable
+// count - see nVar() below):
 //
 //   13 (default) - shape summary variables:
 //        logE nTowers sigmaMax sigmaMin sigmaRatio theta
 //        seedFrac e2Frac e1e2Asym sigX sigY sigXY nNeighbor
+//
+//   4 - set 3 plus the cluster POSITION: ... x y, the centroid in column and
+//      row units. Suggested in review: the shower shape is not position
+//      independent. The ECal is a flat wall about 7.1 m downstream, so a
+//      cluster far from the beam axis is struck at a larger angle and its
+//      shower is stretched along the radial direction - an elongation that has
+//      nothing to do with a second photon. Position also says how close the
+//      cluster is to a detector edge, where the 3x3 window is clipped and
+//      energy leaks out.
+//
+//      WHAT TO WATCH. Position can also leak the ANSWER. In a single-particle
+//      sample each gun illuminates its own patch of the detector, and if the
+//      gamma, pi0 and pi- patches differ at all, the model can read the class
+//      off x and y instead of the shower. Before trusting a gain from set 4,
+//      compare the centroid maps of the three species that qaFeatures.C prints
+//      on the page right after the overview, with the table of means and RMS
+//      beside them; they must agree within statistics. A gain that survives
+//      that check is real, and a model that leans on position transfers badly
+//      to data,
+//      where the occupancy is set by physics and by dead towers rather than by
+//      a gun.
+//
+//      A less leak-prone way to give the model the same physics is a DERIVED
+//      variable: the angle between the shower major axis (theta) and the
+//      radial direction at the cluster, which is what distinguishes "stretched
+//      because it arrived at an angle" from "stretched because there are two
+//      photons". Worth trying if set 4 helps but the maps are not identical.
+//
+//      LIMITATION. x and y are the centroid in column and row units WITHIN one
+//      ECal half, and ClusterInput carries no detector id, so set 4 does not
+//      tell the model whether the cluster is in the north or the south half.
+//      The quantity the angle argument really wants is the radial distance
+//      from the beam axis, which needs the detector id and the half's offset.
+//      If set 4 earns its place, that is the next refinement.
 //
 //   10 - set 13 without the three detector-frame moments:
 //        logE nTowers sigmaMax sigmaMin sigmaRatio theta
@@ -85,6 +120,7 @@ inline int nVar(int set) {
    if (set == 34) return 34;
    if (set == 6) return 6;
    if (set == 10) return 10;  // set 13 minus sigX, sigY, sigXY
+   if (set == 4) return 15;   // set 3 plus the cluster position x, y
    if (set == 3) return 13;   // 9 tower energies + e + sigmaMax + sigmaMin + seedFrac
    return 13;
 }
@@ -107,6 +143,13 @@ inline const char** varNames(int set) {
    // set 10: set 13 with the three detector-frame moments removed. The order
    // of what remains is unchanged, so a set-10 model is a set-13 model with
    // three inputs deleted - nothing else moves.
+   // set 4: set 3 with the cluster centroid appended, nothing else moved, so a
+   // set-4 model is a set-3 model with two inputs added
+   static const char* n4[15] = {"e",   "sigmaMax", "sigmaMin", "seedFrac",
+                                "t00", "t01", "t02",
+                                "t10", "t11", "t12",
+                                "t20", "t21", "t22",
+                                "x",   "y"};
    static const char* n10[10] = {"logE",     "nTowers", "sigmaMax", "sigmaMin", "sigmaRatio",
                                  "theta",    "seedFrac", "e2Frac",  "e1e2Asym", "nNeighbor"};
    static const char* n34[34] = {"e",   "x",   "y",   "nHits", "radius", "dispersion", "sigmaMin",
@@ -120,6 +163,7 @@ inline const char** varNames(int set) {
    if (set == 34) return n34;
    if (set == 6) return n6;
    if (set == 10) return n10;
+   if (set == 4) return n4;
    if (set == 3) return n3;
    return n13;
 }
@@ -171,8 +215,8 @@ inline int compute(int set, const ClusterInput& c, float* out) {
       return 6;
    }
 
-   if (set == 3) {
-      // ----------------------------------------------------------------- 3
+   if (set == 3 || set == 4) {
+      // ------------------------------------------------------------- 3 / 4
       //   0  e         cluster energy [GeV] - the only absolute scale here
       //   1  sigmaMax  major-axis width  (rotation invariant, so it sees a
       //   2  sigmaMin  minor-axis width   split the 3x3 cannot express)
@@ -212,6 +256,14 @@ inline int compute(int set, const ClusterInput& c, float* out) {
       out[3] = e1 / c.e;
       if (kTowerFractions)
          for (int i = 4; i < 13; i++) out[i] /= c.e;
+      if (set == 4) {
+         // the centroid in column and row units, the same convention as
+         // StFcsCluster::x()/y() - not eta/phi, which are the same information
+         // once the detector half is known, and which would need the vertex
+         out[13] = c.x;
+         out[14] = c.y;
+         return 15;
+      }
       return 13;
    }
 

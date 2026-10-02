@@ -189,6 +189,7 @@ void qaFeatures(const char* infile = "feat_pico.root",
    Float_t img[NW * NW], mask[NW * NW];
    Int_t det = 0, nTowers, nNeighbor = 0, seedRow, seedCol, catStar = 0, truthNPhoton = -1, mcLabel = -1;
    Float_t genE = 0;
+   Int_t genPid = 0;
    in->SetBranchAddress("e", &e);
    in->SetBranchAddress("x", &x);
    in->SetBranchAddress("y", &y);
@@ -210,6 +211,8 @@ void qaFeatures(const char* infile = "feat_pico.root",
    if (in->GetBranch("mcLabel")) in->SetBranchAddress("mcLabel", &mcLabel);
    const bool haveGen = (in->GetBranch("genE") != 0);
    if (haveGen) in->SetBranchAddress("genE", &genE);
+   const bool havePid = (in->GetBranch("genPid") != 0);
+   if (havePid) in->SetBranchAddress("genPid", &genPid);
 
    // ------------------------------------------------------- energy axis
    //
@@ -250,6 +253,21 @@ void qaFeatures(const char* infile = "feat_pico.root",
    for (int d = 0; d < 2; d++)
       hXY[d] = new TH2F(Form("hXY_det%d", d), Form("centroid, det %d (%s);x [column];y [row]", d, d == 0 ? "north" : "south"),
                         24, 0, 24, 36, 0, 36);
+   // Centroid per GUN PARTICLE. Feature set 4 adds the cluster position to the
+   // inputs, which is only legitimate if every species illuminates the same
+   // part of the detector: if the gamma, pi0 and pi- guns point at slightly
+   // different patches, a model given x and y can read the class off the
+   // position instead of the shower shape, and the gain evaporates on data.
+   // These three maps, and the table printed with them, are that check.
+   const int kNG = 3;  // gamma, pi0, pi-
+   const char* gName[kNG] = {"gamma", "pi0", "pi-"};
+   TH2F* hXYg[kNG];
+   for (int g = 0; g < kNG; g++)
+      hXYg[g] = new TH2F(Form("hXY_%s", gName[g]), Form("centroid, %s gun;x [column];y [row]", gName[g]),
+                         24, 0, 24, 36, 0, 36);
+   double gN[kNG], gX[kNG], gY[kNG], gXX[kNG], gYY[kNG];
+   for (int g = 0; g < kNG; g++) gN[g] = gX[g] = gY[g] = gXX[g] = gYY[g] = 0;
+
    TH1F* hNTow = new TH1F("hNTow", "towers per cluster;nTowers;clusters", 40, 0.5, 40.5);
    TH1F* hNNb = new TH1F("hNNb", "neighbouring clusters;nNeighbor;clusters", 6, -0.5, 5.5);
    TH1F* hCat = new TH1F("hCat", "FCS Cluster category;category;clusters", 3, -0.5, 2.5);
@@ -318,6 +336,17 @@ void qaFeatures(const char* infile = "feat_pico.root",
       hE->Fill(e);
       if (haveGen) hGenE->Fill(genE);
       if (det == 0 || det == 1) hXY[det]->Fill(x, y);
+      if (havePid) {
+         const int g = (genPid == 1) ? 0 : (genPid == 7) ? 1 : (genPid == 9) ? 2 : -1;
+         if (g >= 0) {
+            hXYg[g]->Fill(x, y);
+            gN[g] += 1;
+            gX[g] += x;
+            gY[g] += y;
+            gXX[g] += (double)x * x;
+            gYY[g] += (double)y * y;
+         }
+      }
       hNTow->Fill(nTowers);
       hNNb->Fill(nNeighbor);
       hCat->Fill(catStar);
@@ -372,6 +401,33 @@ void qaFeatures(const char* infile = "feat_pico.root",
       nt.DrawLatexNDC(0.25, 0.5, "no genE branch in this file");
    }
    cv->Print(pdf + "(");
+
+   // ---- centroid per gun particle: the leakage check for feature set 4 ----
+   if (havePid && (gN[0] + gN[1] + gN[2]) > 0) {
+      printf("\n  cluster centroid per gun particle - the three species must illuminate the\n"
+             "  same region, or a model given x and y (feature set 4) can read the class\n"
+             "  off the position instead of the shower shape\n");
+      printf("  %-8s %10s %9s %9s %9s %9s\n", "gun", "clusters", "<x>", "rms x", "<y>", "rms y");
+      for (int g = 0; g < kNG; g++) {
+         if (gN[g] <= 0) continue;
+         const double mx = gX[g] / gN[g], my = gY[g] / gN[g];
+         printf("  %-8s %10.0f %9.2f %9.2f %9.2f %9.2f\n", gName[g], gN[g], mx,
+                sqrt(fabs(gXX[g] / gN[g] - mx * mx)), my, sqrt(fabs(gYY[g] / gN[g] - my * my)));
+      }
+      printf("  means differing by more than ~0.1 cell are a warning, not a verdict:\n"
+             "  look at the three maps on the next page before adding position as an input\n");
+      cv->Clear();
+      cv->Divide(3, 1);
+      for (int g = 0; g < kNG; g++) {
+         cv->cd(g + 1);
+         gPad->SetLeftMargin(0.15);
+         gPad->SetRightMargin(0.14);
+         gPad->SetLogz(0);
+         hXYg[g]->Draw("colz");
+         keep.push_back(hXYg[g]);
+      }
+      cv->Print(pdf);
+   }
 
    // ------------------------------------------ page 2: sigmaMax vs E + STAR cuts
    cv->Clear();

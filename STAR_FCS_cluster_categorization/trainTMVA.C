@@ -27,16 +27,30 @@
 // The input variables come from StFcsClusterFeatures.h - the same header the
 // inference maker uses - so training and application cannot drift apart.
 //
-// Feature sets: 3, 6, 10, 13 or 34. Set 3 is the 3x3 one - the id names the
+// Feature sets: 3, 4, 6, 10, 13 or 34. Set 3 is the 3x3 one - the id names the
 // window, not the variable count, and it has 13 variables. It is the good
 // starting point: raw tower energies plus E, sigmaMax, sigmaMin and E1/E, with
 // none of the correlated derived triplets of set 13.
 //
+// Set 4 is set 3 plus the cluster position (x, y in cell units), 15 variables.
+// It answers the question "does the model do better if it knows WHERE in the
+// calorimeter the cluster sits?" - the incidence angle grows with radius and
+// stretches the shower radially, and clusters near a plate edge lose part of
+// their tail, so the same shower shape means something slightly different at
+// different positions. The catch is leakage: each single-particle gun
+// illuminates its own patch of the detector, so a model given x and y can read
+// the class off the position and score well on simulation while learning
+// nothing. Before you believe a gain from set 4, look at the per-gun centroid
+// table and maps that qaFeatures.C prints (the page right after the overview):
+// if the gamma, pi0 and pi- means differ, the gain is the leak. See
+// StFcsClusterFeatures.h for the less leak-prone derived alternative.
+//
 // Set 10 is set 13 without sigX, sigY and sigXY - the three detector-frame
-// moments that are algebraically the same information as sigmaMax, sigmaMin
-// and theta. Train 10 and 13 on the same file and compare them with
-// compareModels.C: if they tie, prefer 10, because correlated inputs make the
-// TMVA variable ranking misleading and give the MLP a singular Hessian.
+// moments. They are NOT redundant with sigmaMax, sigmaMin and theta (measured
+// |rho| 0.3-0.65, not 1 - see BUILD.md), so set 10 is a control, not a
+// cleanup. Train 10 and 13 on the same file and compare them with
+// compareModels.C: if they tie, prefer 10, because the smaller input set makes
+// the TMVA variable ranking easier to read.
 //
 // Set 6 is the tower-free one: it is computable from any input without
 // reconstructing anything, which used to be the only way to work on picoDst.
@@ -119,7 +133,7 @@
 
 void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
                const char* jobname = "FcsCat",
-               int featureSet = 13,          // 3, 6, 10, 13 or 34 - see the note above
+               int featureSet = 13,          // 3, 4, 6, 10, 13 or 34 - see the note above
                const char* treename = "clusters",
                float purityCut = 0.8,
                float eMin = 0.5,

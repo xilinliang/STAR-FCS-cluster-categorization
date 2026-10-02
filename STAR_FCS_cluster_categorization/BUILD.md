@@ -517,6 +517,101 @@ bins keeps a larger share where it does live. Where a class is absent entirely �
 merged π⁰ below ~10 GeV — nothing is done, and nothing should be: that is
 kinematics.
 
+### Set 4: does position help, or does it leak?
+
+Review comment: *"In Set 3, would it be better to add position information, like
+pseudorapidity (η) or azimuthal angle (φ)?"*
+
+**Set 4 = set 3 + `x`, `y`** — 15 variables, the first 13 bit-identical to set 3
+in value and in order, then the cluster centroid in column and row units. It is
+in `StFcsClusterFeatures.h` like every other set, so no feature file has to be
+re-dumped: the position is already in the tree.
+
+Why x/y and not η/φ. The ECal is a flat wall ~7.1 m downstream, so for a cluster
+in one half, η and φ are smooth monotone functions of the column and row (plus
+the vertex z and which half it is in). A boosted tree cuts one variable at a time
+and is invariant under any monotone transform of a single input, so `x`, `y` and
+the (η, φ) pair derived from them carry the same information to a BDTG; for the
+MLP the difference is a reparametrisation that the hidden layer can absorb.
+Column and row are also what the detector actually gives us, with no vertex
+assumption baked in. If a reviewer wants η/φ on the axis labels, that is a
+transform at plot time, not a different input.
+
+The physics that motivates it is real: incidence angle grows with radius and
+stretches a shower along the radial direction — an elongation that looks like a
+second photon but is not — and a cluster near a plate edge loses part of its
+tail, so the same shape means something slightly different at different places.
+
+#### The leakage problem, and the check for it
+
+In a single-particle sample **each gun illuminates its own patch of the
+detector**. If the γ, π⁰ and π⁻ runs point even slightly differently, a model
+given `x` and `y` can read the class off the position and score beautifully on
+simulation while learning nothing about showers. On data, where occupancy is set
+by physics and by dead towers, that model collapses.
+
+`qaFeatures.C` now prints the check, on the page immediately after the cluster
+overview: the centroid map of each gun species side by side, and above them a
+table
+
+```
+  cluster centroid per gun particle - the three species must illuminate the
+  same region, or a model given x and y (feature set 4) can read the class
+  off the position instead of the shower shape
+  gun        clusters       <x>     rms x       <y>     rms y
+  gamma         41832      11.73      4.86     17.42      7.95
+  ...
+```
+
+Means agreeing to ≲0.1 cell and visually identical maps ⇒ the position is a
+legitimate input. Means that differ ⇒ treat any set-4 gain as the leak until
+proven otherwise. The table only appears when the file has a `genPid` branch
+(i.e. a simulation dump); on data the page is skipped.
+
+#### Running it
+
+```csh
+# QA first - look at the per-gun centroid page before training anything
+root4star -b -q 'qaFeatures.C+("feat_pico_mix1.root","qa_mix1")'
+
+# train set 4 and set 3 on the same file, same labels, same weights
+root4star -b -q 'trainTMVA.C+("feat_pico_mix1.root","FcsCat",4,"clusters",0.8,0.5,1,1)'
+root4star -b -q 'trainTMVA.C+("feat_pico_mix1.root","FcsCat",3,"clusters",0.8,0.5,1,1)'
+
+# evaluate both on the held-out half (sample=1)
+root4star -b -q 'evalCategory.C+("feat_pico_mix1.root","weights/FcsCat4genw_BDTG.weights.xml",4,"BDTG",1,"ev4",0.5,0.8,"clusters",1,1)'
+root4star -b -q 'evalCategory.C+("feat_pico_mix1.root","weights/FcsCat3genw_BDTG.weights.xml",3,"BDTG",1,"ev3",0.5,0.8,"clusters",1,1)'
+
+root4star -b -q 'compareModels.C+("ev3.root","set 3","ev4.root","set 4")'
+```
+
+#### Reading the outcome
+
+| what you see | what it means | what to do |
+|---|---|---|
+| maps differ, set 4 gains | leakage, most likely | reject; use the derived angle variable instead |
+| maps agree, set 4 gains on merged π⁰ | the incidence-angle effect is real | keep set 4, then add the detector id / radial distance |
+| maps agree, gain ≲1 point everywhere | position adds nothing at this granularity | stay with set 3 |
+| set 4 loses | 2 extra inputs diluting 13 good ones | stay with set 3 |
+
+Also check the TMVA variable ranking in the training log: `x` and `y` near the
+top is the signature of leakage, not of good physics.
+
+#### The less leak-prone alternative
+
+The quantity the physics argument actually wants is not the position but **the
+angle between the shower major axis (`theta`) and the radial direction at the
+cluster**. That one variable separates "stretched because it arrived at an angle"
+from "stretched because there are two photons", and it cannot encode which gun
+fired because every species sees the same geometry. If set 4 helps but the
+centroid maps are not identical, that is the variable to add.
+
+Known limitation of set 4 as written: `x` and `y` are column and row *within one
+ECal half*, and `ClusterInput` carries no detector id, so the model cannot tell
+north from south. The radial distance from the beam axis — the physically
+meaningful coordinate — needs the detector id and the half's offset. That is the
+refinement to make if set 4 earns its place.
+
 ### Set 10: is the detector frame worth its correlation?
 
 Set 13 carries both `sigmaMax`/`sigmaMin`/`theta` and `sigX`/`sigY`/`sigXY`. Those
@@ -746,6 +841,13 @@ checks — including the neighbour-counting rules, where the test caught the
 cross-linking behaviour above being different from what I first assumed. The set-6 features were verified against all 130 ECal clusters above
 0.5 GeV in a real picoDst, and the generator-level projection was checked against
 stub types with a synthetic π⁰ → γγ event.
+
+Feature set 4 (set 3 + position) is covered by `testFeatures.C`, which checks
+that it reports 15 variables, that its first 13 are identical to set 3 in value
+and in name, that `x`/`y` equal the centroid, and that it refuses a cluster with
+no tower list. The per-gun centroid page added to `qaFeatures.C` syntax-checks
+against the ROOT stub headers but has not yet been run on a file — the table and
+the three maps come out of the first `qaFeatures.C` run on a mixed-species dump.
 
 The picoDst tower association was run — as the compiled C++, not a
 reimplementation — over all 167 ECal clusters of `pi0.e30.vz0.run6.picoDst.root`,
