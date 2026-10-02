@@ -19,7 +19,11 @@
 # model smooth. Mixing both is the intended use.
 #
 # Outputs, all prefixed with <tag>:
-#   feat_<tag>.root        the merged feature tree (hadd of the per-file dumps)
+#   feat_pico_<tag>.root   the merged feature tree (hadd of the per-file dumps).
+#                          The per-file dumps keep the input's own name,
+#                          feat_<input>.picoDst.root, so both say where they
+#                          came from - the merge of a short tag like "mix1"
+#                          would not otherwise.
 #   qa_<tag>.pdf/.log      QA of everything that goes into training
 #   FcsCat13genw*.weights.xml  the trained models (labelDef=1, weightMode=1)
 #   eval<tag>_{BDTG,MLP}.* efficiency, purity and the ePIC-style pages
@@ -39,7 +43,14 @@ fi
 
 fset="${FEATURESET:-13}"
 emin="${EMIN:-0.5}"
-feat="feat_${tag}.root"
+feat="feat_pico_${tag}.root"
+# Earlier runs of this script wrote feat_<tag>.root. If that file is there and
+# the new name is not, use it rather than spending another hadd on the same
+# dumps; rename it if you would rather have the new convention.
+if [ ! -f "$feat" ] && [ -f "feat_${tag}.root" ]; then
+   echo "== using feat_${tag}.root from an earlier run (new runs write $feat)"
+   feat="feat_${tag}.root"
+fi
 job="FcsCat"
 wtag="${job}${fset}genw"   # labelDef=1 + weightMode=1 -> "gen" + "w"
 

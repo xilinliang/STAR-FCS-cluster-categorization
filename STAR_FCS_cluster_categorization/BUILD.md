@@ -738,7 +738,7 @@ non-uniform, which is exactly what the flat-in-cluster-energy weights correct.
 ```
 
 It dumps each file (skipping any already dumped), `hadd`s them into
-`feat_<tag>.root`, runs the QA, trains with `labelDef=1 weightMode=1`, evaluates
+`feat_pico_<tag>.root`, runs the QA, trains with `labelDef=1 weightMode=1`, evaluates
 BDTG and MLP on both halves, and writes the BDTG-vs-MLP and train-vs-test
 comparisons. `FEATURESET=10 ./runTrainAll.sh ...` switches the feature set.
 
