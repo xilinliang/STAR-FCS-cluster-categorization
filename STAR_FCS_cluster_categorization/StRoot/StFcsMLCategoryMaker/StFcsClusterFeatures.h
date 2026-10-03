@@ -42,6 +42,14 @@
 //      because it arrived at an angle" from "stretched because there are two
 //      photons". Worth trying if set 4 helps but the maps are not identical.
 //
+//      MEASURED (BDTG, generated-particle labels, flat-in-energy weights, same
+//      held-out half): set 4 and set 3 agree to within 0.4 % in efficiency and
+//      purity in every class, and the merged-pi0 efficiency per photon
+//      separation is flat between them in the 1-2 tower bins where the
+//      incidence-angle effect should have shown. Position adds nothing the 3x3
+//      tower pattern does not already carry, so SET 3 IS THE ONE TO USE. Set 4
+//      stays here so the test is reproducible. See BUILD.md for the numbers.
+//
 //      LIMITATION. x and y are the centroid in column and row units WITHIN one
 //      ECal half, and ClusterInput carries no detector id, so set 4 does not
 //      tell the model whether the cluster is in the north or the south half.

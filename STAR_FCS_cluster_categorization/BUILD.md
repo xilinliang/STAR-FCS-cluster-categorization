@@ -597,6 +597,47 @@ root4star -b -q 'compareModels.C+("ev3.root","set 3","ev4.root","set 4")'
 Also check the TMVA variable ranking in the training log: `x` and `y` near the
 top is the signature of leakage, not of good physics.
 
+#### The measured answer: position adds nothing
+
+Run, BDTG, `labelDef=1 weightMode=1`, same merged file, same held-out half:
+
+| | Single EM | Hadronic | Merged π⁰ |
+|---|---|---|---|
+| **efficiency** set 3 | 0.830 ± 0.003 | 0.897 ± 0.002 | 0.637 ± 0.004 |
+| **efficiency** set 4 | 0.828 ± 0.003 | 0.900 ± 0.002 | 0.633 ± 0.004 |
+| **purity** set 3 | 0.767 ± 0.003 | 0.812 ± 0.003 | 0.821 ± 0.003 |
+| **purity** set 4 | 0.765 ± 0.003 | 0.812 ± 0.003 | 0.820 ± 0.003 |
+
+Differences of 0.2–0.4 % with no consistent sign — set 4 is nominally behind on
+two classes and ahead on one. Merged-π⁰ efficiency per photon separation is flat
+between the two as well, including the 1.0–2.0 tower bins:
+
+| separation [towers] | set 3 | set 4 | clusters |
+|---|---|---|---|
+| 0.50 – 1.00 | 0.855 ± 0.004 | 0.850 ± 0.004 | 7805 |
+| 1.00 – 1.50 | 0.566 ± 0.007 | 0.560 ± 0.007 | 5448 |
+| 1.50 – 2.00 | 0.260 ± 0.008 | 0.257 ± 0.008 | 2926 |
+
+Those bins are where the incidence-angle argument should have bitten hardest: a
+separation of one to two towers is the same size as the radial stretch position
+would explain away. Nothing moves there, so **position carries no information
+the 3×3 tower pattern does not already carry, and set 3 stands.**
+
+The null result also settles the leakage worry in passing: a model exploiting
+the gun patches would have *gained*, not tied. Whatever the centroid maps look
+like, the BDT is not reading the class off `x` and `y`.
+
+**Answer to the review comment:** position information was added as set 4 and
+tested; it changes efficiency and purity by less than half a percent in every
+class and does not help the merged-π⁰ bins where it should. Set 3 is kept. Set 4
+stays in `StFcsClusterFeatures.h` so the test is reproducible.
+
+One caveat on the comparison itself: the two models were evaluated on the *same*
+clusters, so the ± above are the errors on each absolute number, not on their
+difference — the difference is better determined than they suggest. That makes
+the null stronger, not weaker: a real effect of the quoted size would have shown
+up cleanly.
+
 #### The less leak-prone alternative
 
 The quantity the physics argument actually wants is not the position but **the
