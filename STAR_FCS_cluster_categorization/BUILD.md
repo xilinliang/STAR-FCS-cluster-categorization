@@ -777,8 +777,25 @@ and prints the 2×2. Reading it is mechanical:
 - numbers follow the **column** → the *data* differs and both models react alike
 - neither → the two interact; go to the per-energy pages
 
-Environment overrides: `FEATURESET`, `METHOD`, `EMIN`, `NORMMODE`, and
-`SKIPTRAIN=1` to reuse existing weight files.
+Environment overrides: `FEATURESET`, `METHOD`, `EMIN`, `NORMMODE`, `WEIGHTMODE`,
+and `SKIPTRAIN=1` to reuse existing weight files.
+
+`WEIGHTMODE=0` deserves a run of its own on any sample built from fixed-energy
+guns. The flat-in-energy weight is `1/N(class, E bin)`, capped at 10× the class
+median. γ and merged π⁰ keep nearly all the gun energy, so their *cluster*
+energy spectrum is six spikes plus a thin continuum; π⁻ deposits a random
+fraction, so its spectrum is smooth. Flattening those two shapes with the same
+recipe is not the same operation: the sparse bins between the spikes hold few γ
+clusters, and those get pushed to the cap, so a handful of clusters carry a
+large share of that class's gradient. **An MLP trained by back-propagation feels
+that directly — a 10× cluster moves the weights 10× per step — while a BDT sees
+weights only as bin sums.** "Same file, the MLP breaks and the BDTG does not" is
+the signature. The weight table printed by `trainTMVA.C` (`min w`, `max w`,
+`capped`) says whether the cap is binding:
+
+```csh
+grep -A 8 "flat-in-energy training weights" train_mix1.log
+```
 
 #### Three things the script also prints
 

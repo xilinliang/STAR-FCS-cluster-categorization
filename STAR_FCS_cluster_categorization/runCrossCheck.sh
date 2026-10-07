@@ -41,7 +41,18 @@
 # Environment overrides:
 #   FEATURESET=3   feature set            METHOD=MLP   method to table
 #   EMIN=0.5       cluster energy cut     NORMMODE=0   1 = EqualNumEvents
+#   WEIGHTMODE=1   0 turns OFF the flat-in-cluster-energy training weights
 #   SKIPTRAIN=1    reuse existing weight files instead of retraining
+#
+# WEIGHTMODE=0 is worth one run of its own. The flat-in-energy weight is
+# 1/N(class, E bin), capped at 10x the class median. On a sample built from
+# fixed-energy guns the CLUSTER energy spectrum is spiky for gamma and merged
+# pi0 (they keep nearly all the gun energy) but smooth for pi- (it deposits a
+# random fraction), so the sparse bins BETWEEN the spikes hold few gamma
+# clusters and those get pushed to the cap. An MLP trained by back-propagation
+# feels that directly - a 10x cluster moves the weights 10x per step - while a
+# BDT only sees weights as bin sums. Same file, MLP breaks and BDTG does not,
+# is the signature.
 
 set -e
 fA="$1"; nA="$2"; fB="$3"; nB="$4"
@@ -58,13 +69,15 @@ fset="${FEATURESET:-3}"
 emin="${EMIN:-0.5}"
 meth="${METHOD:-MLP}"
 nrm="${NORMMODE:-0}"
-sfx="genw"; [ "$nrm" = "1" ] && sfx="genweq"
+wgt="${WEIGHTMODE:-1}"
+sfx="gen"; [ "$wgt" = "1" ] && sfx="genw"
+[ "$nrm" = "1" ] && sfx="${sfx}eq"
 jA="X${nA}"; jB="X${nB}"
 wA="weights/${jA}${fset}${sfx}_${meth}.weights.xml"
 wB="weights/${jB}${fset}${sfx}_${meth}.weights.xml"
 
 echo "== cross check: $nA ($fA) vs $nB ($fB)"
-echo "   set $fset, method $meth, eMin $emin, normMode $nrm"
+echo "   set $fset, method $meth, eMin $emin, weightMode $wgt, normMode $nrm"
 
 # ---- 1. train one model per sample, identical settings ----------------------
 if [ "${SKIPTRAIN:-0}" = "1" ]; then
@@ -73,7 +86,7 @@ else
    for p in "$jA:$fA" "$jB:$fB"; do
       j="${p%%:*}"; f="${p#*:}"
       echo "== training $j on $f"
-      root4star -b -q "trainTMVA.C+(\"$f\",\"$j\",$fset,\"clusters\",0.8,$emin,1,1,$nrm)" \
+      root4star -b -q "trainTMVA.C+(\"$f\",\"$j\",$fset,\"clusters\",0.8,$emin,1,$wgt,$nrm)" \
          2>&1 | tee "xtrain_${j}.log"
    done
 fi
