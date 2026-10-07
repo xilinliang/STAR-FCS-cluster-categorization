@@ -63,6 +63,17 @@
 // The input file can come from a .fzd, a MuDst or a picoDst - all three write
 // this same tree, and all three carry the generator-level label mcLabel.
 //
+// CLASS PRIOR (normMode, the last argument). 0 = NormMode=NumEvents, the
+// default and what every weight file so far used: each class's total weight is
+// its cluster count, so the model inherits the gamma : pi0 : pi- ratio of
+// whatever you happened to generate. 1 = EqualNumEvents, the three classes
+// equalised. Cluster yield per event differs by species, so merging new files
+// changes that ratio even with equal event counts - and with NumEvents the
+// ratio IS the prior, which an MLP follows much more closely than a BDTG. The
+// gun mixture is arbitrary and nothing like data, so normMode=1 is the better
+// choice for a model meant for data; it is not the default only so old weight
+// files reproduce. The job name gains an "eq" suffix. See runCrossCheck.sh.
+//
 // LABELS (labelDef, the last argument)
 //   0 (default) by the photons inside the cluster (mcLabel): other /
 //     onePhoton / twoPhoton. Every cluster of every sample is used.
@@ -138,7 +149,8 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
                float purityCut = 0.8,
                float eMin = 0.5,
                int labelDef = 0,             // 0 mcLabel, 1 generated particle (ePIC-style)
-               int weightMode = 0) {         // 0 unweighted, 1 flat in cluster energy
+               int weightMode = 0,           // 0 unweighted, 1 flat in cluster energy
+               int normMode = 0) {           // 0 NumEvents, 1 EqualNumEvents - see below
    using namespace StFcsClusterFeatures;
    gSystem->Load("libTMVA");
    TMVA::Tools::Instance();
@@ -147,8 +159,9 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    const char** varname = varNames(featureSet);
    if (labelDef != 1) labelDef = 0;
    if (weightMode != 1) weightMode = 0;
-   const TString job = Form("%s%d%s%s", jobname, featureSet, labelDef == 1 ? "gen" : "",
-                            weightMode == 1 ? "w" : "");
+   if (normMode != 1) normMode = 0;
+   const TString job = Form("%s%d%s%s%s", jobname, featureSet, labelDef == 1 ? "gen" : "",
+                            weightMode == 1 ? "w" : "", normMode == 1 ? "eq" : "");
    printf("training feature set %d (%d variables), job %s\n", featureSet, NVAR, job.Data());
 
    // ---------------------------------------------------------------- input
@@ -562,7 +575,27 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    }
    if (weightMode == 1)
       for (int c = 0; c < 3; c++) factory->SetWeightExpression("w", clsname[c]);
-   factory->PrepareTrainingAndTestTree("", "NormMode=NumEvents:!V");
+   // NORMMODE - what the three classes are worth relative to each other.
+   //
+   //   NumEvents (default)   each class's total weight equals its number of
+   //                         clusters, so the model inherits the gamma : pi0 :
+   //                         pi- ratio of whatever you happened to generate as
+   //                         its class prior. Generate more photon events and
+   //                         the boundary moves toward "single EM", at the
+   //                         expense of the class you generated less of.
+   //   EqualNumEvents        the three classes carry equal total weight. The
+   //                         gun mixture stops mattering, so results are
+   //                         comparable between samples - and on data, where
+   //                         the true mixture is nothing like the gun's, the
+   //                         arbitrary prior was never the right one anyway.
+   //
+   // Default stays NumEvents so old weight files reproduce. Pass normMode=1
+   // when comparing two samples, or when the class counts printed below are
+   // lopsided.
+   factory->PrepareTrainingAndTestTree("", normMode == 1 ? "NormMode=EqualNumEvents:!V"
+                                                         : "NormMode=NumEvents:!V");
+   printf("  class normalisation: %s\n", normMode == 1 ? "EqualNumEvents (classes equalised)"
+                                                        : "NumEvents (class prior = the gun mixture)");
    factory->BookMethod(TMVA::Types::kBDT, "BDTG",
                        "!H:!V:NTrees=600:MaxDepth=4:BoostType=Grad:Shrinkage=0.10:"
                        "UseBaggedBoost:BaggedSampleFraction=0.5:nCuts=40:"

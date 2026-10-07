@@ -751,6 +751,95 @@ efficiency bin by bin in photon separation with the cluster count per bin, then
 writes a three-page PDF. The inputs must be evaluations of the same feature file
 with the same `truthDef`; nothing checks that.
 
+### Two samples disagree: is it the data or the model?
+
+Two evaluations of the same feature set and method on two different samples can
+differ for two completely different reasons, and the PDF does not record which:
+the **clusters** are different, or the **model** is different (different training
+file, but also different `labelDef`, `weightMode`, `normMode` — none of which the
+evaluation plots show). `runCrossCheck.sh` separates them.
+
+```csh
+./runCrossCheck.sh feat_pico_flat.root flat feat_pico_mix1.root mix
+```
+
+It trains one model per sample **from scratch with identical settings**, then
+evaluates every model on every file:
+
+|  | on A | on B |
+|---|---|---|
+| **trained on A** | in-sample | transfer |
+| **trained on B** | transfer | in-sample |
+
+and prints the 2×2. Reading it is mechanical:
+
+- numbers follow the **row** → the *model* differs and carries its behaviour with it
+- numbers follow the **column** → the *data* differs and both models react alike
+- neither → the two interact; go to the per-energy pages
+
+Environment overrides: `FEATURESET`, `METHOD`, `EMIN`, `NORMMODE`, and
+`SKIPTRAIN=1` to reuse existing weight files.
+
+#### Three things the script also prints
+
+**The FCS Cluster control.** `catStar` is a fixed cut on σmax, E and nTowers. It
+cannot learn, so *any* change in its numbers between two files is pure sample
+composition, measured for free. Subtract it and what is left is the model. It is
+also a calibrated ruler for direction: STAR's one-photon cut `σmax < 1/2.1 −
+0.001E + 2/E` **tightens** with energy (0.67 at 10 GeV, 0.47 at 50 GeV), so a
+drop in its photon efficiency means the sample got harder — higher energy — and
+the two-photon cut's `+7/E` **loosens**, so π⁰ gains at the same time.
+
+**Efficiency vs purity vs purity(balanced).** Efficiency is a per-true-class
+quantity: it does not care how many of the *other* classes are in the file.
+Plain purity does — change the γ : π⁰ : π⁻ mixture and purity moves even with a
+byte-identical model. So comparing plain purity across two differently-composed
+samples is partly comparing the samples. `evalCategory.C` prints
+`purity(balanced)`, which removes the mixture, and the class mix itself. **Use
+efficiency and purity(balanced) across samples; quote plain purity only within
+one sample.** The script tables both.
+
+**Test half vs training half.** If B is a `hadd` that contains A, the split is by
+event ordinal in tree order, so A's test half is not guaranteed to be B's test
+half: the parity depends on how many events sit in front of A's block inside B.
+The script evaluates each model on both halves of each file and prints them side
+by side. Agreement means no leak is biasing anything. (The measured train/test
+gap on these samples is ≤0.006, so a leak would be invisible anyway — but it is
+checked, not assumed.) To remove the question entirely, build B from files A does
+not contain.
+
+### NormMode: who sets the class prior
+
+`trainTMVA.C`'s ninth argument, `normMode`:
+
+| | |
+|---|---|
+| `0` **NumEvents** (default) | each class's total weight equals its cluster count, so **the model inherits the γ : π⁰ : π⁻ ratio of whatever you happened to generate** as its class prior |
+| `1` **EqualNumEvents** | the three classes carry equal total weight |
+
+This matters more than it looks. Cluster yield per event differs by species — γ
+gives about one cluster, π⁰ one or two, π⁻ anywhere from none above threshold to
+several — so merging a new set of files changes the class ratio even when the
+event counts per species are equal. With `NumEvents` that ratio *is* the prior,
+and an MLP (limited capacity, cross-entropy loss, `HiddenLayers=N+5,N`,
+`NCycles=600`) follows a prior much more closely than a 600-tree BDTG, which can
+carve out a minority region regardless. A sample change that moves the MLP by
+tens of points while leaving the BDTG flat is the signature.
+
+The gun mixture is arbitrary — it is whatever was generated, and nothing like the
+class mix in data — so letting it set the prior makes every number
+sample-dependent. `normMode=1` removes that and is the better default for a model
+meant to be applied to data. It is not the default here only so that existing
+weight files reproduce; the job name gains an `eq` suffix so the two do not
+collide.
+
+```csh
+NORMMODE=1 ./runCrossCheck.sh feat_pico_flat.root flat feat_pico_mix1.root mix
+```
+
+Run the cross check both ways: if the 2×2 flattens out under `normMode=1`, the
+class prior was the whole story.
+
 ### Fixed-energy samples, and how to mix them
 
 Single-particle guns at a few fixed energies (10, 20, 30, 40, 50, 60 GeV) are the
