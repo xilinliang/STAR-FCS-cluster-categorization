@@ -1155,10 +1155,81 @@ single EM is ever needed for something else, the fix is a separate low-energy
 model or a weighting that only flattens the bottom of the spectrum — not a
 global reweighting that costs the hadronic class a quarter of its efficiency.
 
-Two things still open: the BDTG has not been retabled this way (it lost 7 points
-to the weighting against the MLP's 23, so it may be fine either way), and neither
-model has been run with a second random seed, so the 3-point merged-π⁰
-differences between training samples carry no measured spread.
+The BDTG is retabled in the next section. Still open: neither model has been run
+with a second random seed, so the few-point differences between training samples
+carry no measured spread.
+
+#### BDTG under the same conditions, and the method decision
+
+`env METHOD=BDTG WEIGHTMODE=0 SKIPTRAIN=1 ./runCrossCheck.sh ...`, same four
+cells, same clusters (the FCS Cluster control is identical to the MLP run,
+0.533 / 0.185 on flat and 0.426 / 0.197 on mix, which is the consistency check):
+
+| model \ data | on flat | on mix |
+|---|---|---|
+| **trained flat** | 0.938 / 0.812 / 0.687 | 0.936 / 0.860 / 0.723 |
+| **trained mix** | 0.950 / 0.792 / 0.689 | 0.943 / 0.852 / 0.723 |
+
+The BDTG is even less sensitive to the training sample than the MLP — row
+effects +0.010 / −0.014 / +0.001. And **the weighting cost it 4.6 points of
+hadronic efficiency (0.897 weighted → 0.943) against the MLP's 23.** A factor of
+five, which is the gradient-versus-bin-sums argument measured: back-propagation
+feels an individual event weight directly, a boosted tree only ever sees weights
+aggregated into bin sums.
+
+Head to head, both unweighted, mix-trained, mix test half:
+
+| class | BDTG eff | MLP eff | BDTG pur(bal) | MLP pur(bal) | BDTG eff×pur | MLP eff×pur |
+|---|---|---|---|---|---|---|
+| Hadronic | **0.943** | 0.914 | 0.837 | **0.864** | 0.789 | 0.790 |
+| Single EM | 0.852 | 0.848 | **0.808** | 0.789 | **0.688** | 0.669 |
+| Merged π⁰ | 0.723 | **0.732** | **0.883** | 0.844 | **0.638** | 0.618 |
+
+Neither efficiency nor purity alone decides anything — a model can always buy one
+with the other. On the product the BDTG is ahead on two classes and tied on the
+third.
+
+The MLP's one remaining lead is merged π⁰ at wide separation:
+
+| separation [towers] | BDTG | MLP | MLP − BDTG | clusters |
+|---|---|---|---|---|
+| 0.50 – 1.00 | 0.896 | 0.895 | −0.001 | 7805 |
+| 1.00 – 1.50 | 0.727 | 0.733 | +0.006 | 5448 |
+| 1.50 – 2.00 | 0.334 | **0.371** | **+0.037** | 2926 |
+| 2.00 – 2.50 | 0.197 | **0.251** | **+0.054** | 371 |
+
+Much reduced from the 8–20 points it held under set 13 with weights on, and it is
+**bought with purity** — the BDTG is 3.9 points higher on merged-π⁰
+purity(balanced). So this is a working-point difference, not a capability one,
+and only one of the two models can be moved along it: BDTG scores span 0–1, while
+MLP scores compress into 0.2–0.6 (softmax of tanh) and admit no useful threshold.
+A scan of the BDTG's P(merged π⁰) threshold would settle whether it dominates the
+MLP's single operating point outright.
+
+Overtraining is fine for both — the largest train/test gap in the BDTG table is
+0.009, on the smallest training sample.
+
+### The configuration to use
+
+| | | why |
+|---|---|---|
+| sample | mixed (flat 1–60 + fixed energies) | barely matters; row effects < 0.015 for both methods |
+| feature set | **3** | set 4 (position) tested and rejected; set 13 not yet retested unweighted |
+| method | **BDTG** | ahead or tied on eff×purity in all three classes, and 67 s to train against the MLP's 388 s |
+| `labelDef` | **1** | generated particle, cleaned with mcLabel |
+| `weightMode` | **0** | the flat-in-energy weighting costs 4.6 pts hadronic on BDTG, 23 on MLP, and buys nothing above ~20 GeV |
+| `normMode` | **0** | class shares are near balanced, so NumEvents does not bite |
+| quote range | **above ~15 GeV** | merged π⁰ is unusable below that whatever the model |
+
+```csh
+root4star -b -q 'trainTMVA.C+("feat_pico_mix1.root","FcsCat",3,"clusters",0.8,0.5,1,0,0)'
+root4star -b -q 'evalCategory.C+("feat_pico_mix1.root","weights/FcsCat3gen_BDTG.weights.xml",3,"BDTG",1,"",0.5,0.8,"clusters",1,1)'
+```
+
+Against the FCS Cluster reference on the same clusters: single EM 0.426
+efficiency at 0.263 purity, merged π⁰ 0.197 efficiency, and no hadronic class at
+all. The model roughly doubles single-EM efficiency at three times the purity,
+and takes merged π⁰ from 0.20 to 0.72.
 
 ### Open issue: seedFrac above 1
 
