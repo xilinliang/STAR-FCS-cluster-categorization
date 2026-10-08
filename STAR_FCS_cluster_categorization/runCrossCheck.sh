@@ -44,6 +44,15 @@
 #   WEIGHTMODE=1   0 turns OFF the flat-in-cluster-energy training weights
 #   SKIPTRAIN=1    reuse existing weight files instead of retraining
 #
+# SETTING THEM FROM tcsh (the STAR default shell). "VAR=value command" is bash
+# syntax and tcsh answers "WEIGHTMODE=0: Command not found." Use env, which is a
+# real program and works in either shell:
+#
+#   env WEIGHTMODE=0 ./runCrossCheck.sh feat_pico_flat.root flat feat_pico_mix1.root mix >& xc.log
+#
+# or setenv WEIGHTMODE 0 ... unsetenv WEIGHTMODE. Note >& and not >: in csh a
+# plain > leaves stderr on the terminal, and ROOT writes plenty there.
+#
 # WEIGHTMODE=0 is worth one run of its own. The flat-in-energy weight is
 # 1/N(class, E bin), capped at 10x the class median. On a sample built from
 # fixed-energy guns the CLUSTER energy spectrum is spiky for gamma and merged

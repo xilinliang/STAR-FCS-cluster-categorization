@@ -780,6 +780,18 @@ and prints the 2×2. Reading it is mechanical:
 Environment overrides: `FEATURESET`, `METHOD`, `EMIN`, `NORMMODE`, `WEIGHTMODE`,
 and `SKIPTRAIN=1` to reuse existing weight files.
 
+**Setting them from tcsh.** `VAR=value command` is bash syntax; tcsh — the STAR
+default shell — answers `WEIGHTMODE=0: Command not found.` Use `env`, which is a
+real program and works in either shell, and redirect with `>&` rather than `>`,
+since a plain `>` in csh leaves stderr on the terminal and ROOT writes plenty
+there:
+
+```csh
+env WEIGHTMODE=0 ./runCrossCheck.sh feat_pico_flat.root flat feat_pico_mix1.root mix >& xc_w0.log
+```
+
+The same applies to every `VAR=... ./script` line below.
+
 `WEIGHTMODE=0` deserves a run of its own on any sample built from fixed-energy
 guns. The flat-in-energy weight is `1/N(class, E bin)`, capped at 10× the class
 median. γ and merged π⁰ keep nearly all the gun energy, so their *cluster*
@@ -866,8 +878,8 @@ argument above predicts: back-propagation feels an individual event weight
 directly, a tree only sees weights as bin sums.
 
 That is the trade to decide deliberately, and it is much steeper than it looked
-when it was first turned on. `WEIGHTMODE=0 ./runCrossCheck.sh ...` measures it
-cleanly on both samples at once.
+when it was first turned on. `env WEIGHTMODE=0 ./runCrossCheck.sh ...` measures
+it cleanly on both samples at once.
 
 #### The one real model difference: merged π⁰ between the gun energies
 
@@ -915,7 +927,7 @@ weight files reproduce; the job name gains an `eq` suffix so the two do not
 collide.
 
 ```csh
-NORMMODE=1 ./runCrossCheck.sh feat_pico_flat.root flat feat_pico_mix1.root mix
+env NORMMODE=1 ./runCrossCheck.sh feat_pico_flat.root flat feat_pico_mix1.root mix
 ```
 
 Run the cross check both ways: if the 2×2 flattens out under `normMode=1`, the
@@ -951,7 +963,8 @@ non-uniform, which is exactly what the flat-in-cluster-energy weights correct.
 It dumps each file (skipping any already dumped), `hadd`s them into
 `feat_pico_<tag>.root`, runs the QA, trains with `labelDef=1 weightMode=1`, evaluates
 BDTG and MLP on both halves, and writes the BDTG-vs-MLP and train-vs-test
-comparisons. `FEATURESET=10 ./runTrainAll.sh ...` switches the feature set.
+comparisons. `env FEATURESET=10 ./runTrainAll.sh ...` switches the feature set
+(`env`, because tcsh does not take `VAR=value command`).
 
 `evalCategory.C` prints an extra table for such a sample: efficiency and purity
 per class **per energy band**, with the FCS Cluster category on the line beneath.
