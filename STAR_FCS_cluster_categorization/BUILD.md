@@ -894,12 +894,13 @@ The flat-trained model beats the mix-trained one on merged π⁰, by 8 points at
 | 2.00 – 2.50 | 0.296 | 0.194 | 371 |
 
 It survives the swap of evaluation file, so it is the model, not the data — and
-it is the interpolation worry from `runTrainAll.sh`'s header, now measured.
-Photon separation is set by energy (d_min ≈ 34.7/E towers), so six fixed gun
-energies mean six preferred separations with gaps in between, and the network
-interpolates across those gaps worse than one trained on a continuum. **Keep the
-flat 1–60 GeV sample in any mix**; the fixed energies buy statistics but cost
-smoothness exactly where merged π⁰ is hardest.
+**This reverses under `weightMode=0` — see the next section.** The reading at the
+time was the interpolation worry from `runTrainAll.sh`'s header: photon
+separation is set by energy (d_min ≈ 34.7/E towers), so six fixed gun energies
+mean six preferred separations with gaps between them. Run 2 showed the cause is
+the weighting, not the spikes: with the weights off the mix-trained model wins
+merged π⁰ instead of losing it. Keeping the flat 1–60 GeV sample in the mix is
+still sensible for smooth coverage, but it is no longer what this table shows.
 
 ### NormMode: who sets the class prior
 
@@ -1037,6 +1038,71 @@ give it an absolute path the container mounts — a relative `weights/...`
 resolves against the job's scratch directory, not your working directory.
 
 ---
+
+#### Run 2, weights off: the weighting was the whole story
+
+Same four cells with `WEIGHTMODE=0` (weight files `Xflat3gen_*`, `Xmix3gen_*` —
+no `w`):
+
+| model \ data | on flat | on mix |
+|---|---|---|
+| **trained flat** | 0.910 / 0.822 / 0.673 | 0.901 / 0.867 / 0.705 |
+| **trained mix** | 0.924 / 0.791 / 0.710 | 0.914 / 0.848 / 0.732 |
+
+Averaged over all four cells, against the weighted run:
+
+| | weighted | unweighted | |
+|---|---|---|---|
+| hadronic efficiency | 0.682 | **0.912** | **+23.0 pts** |
+| single EM efficiency | 0.872 | 0.832 | −4.0 pts |
+| merged π⁰ efficiency | 0.671 | **0.705** | **+3.5 pts** |
+| hadronic purity (bal) | 0.852 | 0.850 | − |
+| single EM purity (bal) | 0.626 | **0.765** | **+13.9 pts** |
+| merged π⁰ purity (bal) | 0.832 | 0.843 | +1.2 pts |
+
+**Flat-in-energy weighting is actively harmful to the MLP.** It is behind on
+every figure of merit but one, and the exception is not a gain: the 4 points of
+single-EM efficiency are bought with 14 points of single-EM purity, which is
+just the model making single EM its catch-all class — the same leak that showed
+as π⁻ → onePhoton at 0.26.
+
+It also closes the original mystery. `trained flat → flat` hadronic goes
+0.675 → **0.910**, recovering the 0.88 of `evalFcsCat3_MLP.pdf`. That older
+evaluation was an unweighted model, as the diagonal check suggested.
+
+**The merged-π⁰ sign flips too.** Weighted, the flat-trained model beat the
+mix-trained one by 4 points. Unweighted, the mix-trained model wins by 3.2
+overall and by 4.9 at 0.5–1.0 tower separation. So the "six gun energies leave
+interpolation gaps" reading of run 1 was wrong: the damage came from the
+weighting upweighting the sparse bins *between* the spikes, not from the spikes
+themselves. With the weights off, the mix's extra statistics help, merged π⁰
+included, and **the mix is the better training sample.**
+
+One more thing worth noticing: the mix data is *harder* for `catStar` (photon
+0.533 → 0.426, because STAR's cut tightens with energy) and *easier* for the
+network (+5 points of single EM efficiency). Higher-energy showers are better
+defined, which a trained model exploits and a fixed cut cannot.
+
+#### The caveat before you drop the weighting for good
+
+The weighting exists to remove the **energy prior** — to stop the model learning
+"most clusters near 60 GeV are X" from the training spectrum, a correlation that
+does not transfer to data. The unweighted numbers look better here partly
+*because* train and test share one spectrum, so that prior pays off instead of
+costing. The test is the efficiency-vs-energy pages of the unweighted
+evaluation:
+
+- efficiency roughly flat in energy → the weighting was solving a problem the
+  sample does not have. Drop it.
+- efficiency strongly energy-dependent → the prior is real and the fix is a
+  *gentler* weighting, not removal: a lower cap than 10×, wider energy bins, or
+  weighting in GENERATED energy, which is smooth for all three classes by
+  construction while cluster energy is spiky for γ and π⁰ and smooth for π⁻.
+
+Until that is checked, `weightMode=0` is the better default for the MLP but not
+yet a settled choice. The BDTG has not been retabled under `weightMode=0` here;
+the earlier measurement had it losing only 7 points to the weighting against the
+MLP's 23, so it is far less sensitive and may not need the change.
 
 ### Open issue: seedFrac above 1
 
