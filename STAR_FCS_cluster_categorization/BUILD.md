@@ -825,6 +825,70 @@ gap on these samples is ≤0.006, so a leak would be invisible anyway — but it
 checked, not assumed.) To remove the question entirely, build B from files A does
 not contain.
 
+#### What the first run found
+
+Four cells, same method, same feature set, same settings, MLP efficiency on the
+held-out half:
+
+| model \ data | on flat | on mix |
+|---|---|---|
+| **trained flat** | 0.675 / 0.855 / 0.674 | 0.675 / 0.877 / 0.708 |
+| **trained mix** | 0.692 / 0.867 / 0.631 | 0.687 / 0.887 / 0.669 |
+
+(other / onePhoton / twoPhoton. Row effects +0.015 / +0.011 / −0.041, column
+effects −0.003 / +0.021 / +0.036.)
+
+**There is no sample effect.** Every cell agrees within a few points. The flat
+1–60 GeV sample and the mixed sample train the same model and evaluate the same.
+
+**The 19-point hadronic gap was the old weight file, not the data.** The mix
+diagonal reproduces its original run exactly (0.687 / 0.887 / 0.669 against
+0.69 / 0.89 / 0.67). The flat diagonal does not: retrained under
+`labelDef=1 weightMode=1`, the flat sample gives **0.675** hadronic efficiency,
+not the 0.88 of `evalFcsCat3_MLP.pdf`. That older evaluation came from a model
+trained with different arguments — on the evidence, `weightMode=0`.
+
+So the comparison that started this was never between two samples. It was
+between a weighted and an unweighted model. Everything else checked out: the
+class shares are near identical (35.8 / 36.2 / 28.0 against 36.0 / 34.4 / 29.6),
+the train/test halves agree to ≤0.004 in all four combinations, and the FCS
+Cluster control moved exactly as the energy-dependent cut predicts
+(photon 0.533 → 0.426, π⁰ 0.185 → 0.197) — the mix really is the harder sample,
+and the model is simply indifferent to that.
+
+#### What flat-in-energy weighting costs the MLP
+
+Reading those two numbers together — 0.88 unweighted, 0.675 weighted, same
+sample, same method — the weighting costs the **MLP about 20 points of hadronic
+efficiency** and buys about 5 points of single EM. The same switch cost the BDTG
+7 points (0.92 → 0.85). Three times the price, which is what the gradient
+argument above predicts: back-propagation feels an individual event weight
+directly, a tree only sees weights as bin sums.
+
+That is the trade to decide deliberately, and it is much steeper than it looked
+when it was first turned on. `WEIGHTMODE=0 ./runCrossCheck.sh ...` measures it
+cleanly on both samples at once.
+
+#### The one real model difference: merged π⁰ between the gun energies
+
+The flat-trained model beats the mix-trained one on merged π⁰, by 8 points at
+1.5–2.0 tower separation, **on both datasets**:
+
+| separation [towers] | trained flat | trained mix | clusters (mix data) |
+|---|---|---|---|
+| 0.50 – 1.00 | 0.861 | 0.841 | 7805 |
+| 1.00 – 1.50 | 0.688 | 0.648 | 5448 |
+| 1.50 – 2.00 | 0.398 | 0.319 | 2926 |
+| 2.00 – 2.50 | 0.296 | 0.194 | 371 |
+
+It survives the swap of evaluation file, so it is the model, not the data — and
+it is the interpolation worry from `runTrainAll.sh`'s header, now measured.
+Photon separation is set by energy (d_min ≈ 34.7/E towers), so six fixed gun
+energies mean six preferred separations with gaps in between, and the network
+interpolates across those gaps worse than one trained on a continuum. **Keep the
+flat 1–60 GeV sample in any mix**; the fixed energies buy statistics but cost
+smoothness exactly where merged π⁰ is hardest.
+
 ### NormMode: who sets the class prior
 
 `trainTMVA.C`'s ninth argument, `normMode`:
@@ -960,6 +1024,33 @@ give it an absolute path the container mounts — a relative `weights/...`
 resolves against the job's scratch directory, not your working directory.
 
 ---
+
+### Open issue: seedFrac above 1
+
+TMVA's variable summary in the set-3 training reports `seedFrac` with a maximum
+of **2.45** on the training half and **5.41** on the test half. `seedFrac = e1/E`
+is the leading tower's share of the cluster energy and cannot exceed 1. `t11` is
+the same number by construction (the correlation matrix shows +1.000), so it is
+affected identically, and because the set-3 tower energies are stored as
+fractions of E, a cluster with `seedFrac = 5.4` has its whole 3x3 window scaled
+wrongly.
+
+The likely cause is the picoDst tower recovery: `StPicoFcsCluster` stores no
+tower list, so `StFcsTowerAssoc` rebuilds it geometrically while the cluster
+energy comes from the pico cluster itself. The two come from different places, so
+a tower belonging to a *neighbouring* cluster can be assigned here, and then
+`e1 > E`. On MuDst, where the list is the original, this should not happen.
+
+How many clusters are affected is not known yet — the TMVA summary gives only the
+extremes. To find out:
+
+```csh
+root4star -b -q 'qaFeatures.C+("feat_pico_mix1.root","qa_mix1")'   # min/max per variable
+```
+
+and compare the same dump from a MuDst. If the fraction is small the effect on
+training is negligible, but the variable should still be clamped or the cluster
+rejected rather than fed in at 5x.
 
 ## When it goes wrong
 
