@@ -81,6 +81,11 @@ nrm="${NORMMODE:-0}"
 wgt="${WEIGHTMODE:-1}"
 sfx="gen"; [ "$wgt" = "1" ] && sfx="genw"
 [ "$nrm" = "1" ] && sfx="${sfx}eq"
+# Output names carry the switches, so a WEIGHTMODE=0 or NORMMODE=1 run does not
+# overwrite the default run's .root files - you want both on disk to overlay
+# them with compareModels.C afterwards.
+rt=""; [ "$wgt" = "0" ] && rt="${rt}_w0"
+[ "$nrm" = "1" ] && rt="${rt}_eq"
 jA="X${nA}"; jB="X${nB}"
 wA="weights/${jA}${fset}${sfx}_${meth}.weights.xml"
 wB="weights/${jB}${fset}${sfx}_${meth}.weights.xml"
@@ -104,14 +109,14 @@ for w in "$wA" "$wB"; do
 done
 
 # ---- 2. four evaluations, test half; plus the training half as a leak check --
-#   tag = x_<weights>W_<data>D[_tr]
+#   tag = x_<weights>W_<data>D[_w0][_eq][_tr]
 for wp in "$nA:$wA" "$nB:$wB"; do
    wn="${wp%%:*}"; w="${wp#*:}"
    for dp in "$nA:$fA" "$nB:$fB"; do
       dn="${dp%%:*}"; d="${dp#*:}"
       for half in 1 0; do
          sfx2=""; [ "$half" = "0" ] && sfx2="_tr"
-         out="x_${wn}W_${dn}D${sfx2}"
+         out="x_${wn}W_${dn}D${rt}${sfx2}"
          echo "== $meth trained on $wn, evaluated on $dn ($([ $half = 1 ] && echo test || echo training) half)"
          root4star -b -q \
             "evalCategory.C+(\"$d\",\"$w\",$fset,\"$meth\",$half,\"$out\",$emin,0.8,\"clusters\",1,1)" \
@@ -146,7 +151,7 @@ echo "================= $meth, set $fset, test half, efficiency ================
 printf "  %-22s %12s %12s %12s\n" "model \\ data" "other(had)" "onePhoton" "twoPhoton"
 for wn in "$nA" "$nB"; do
    for dn in "$nA" "$nB"; do
-      L="x_${wn}W_${dn}D.log"
+      L="x_${wn}W_${dn}D${rt}.log"
       printf "  %-22s %12s %12s %12s\n" "trained $wn -> $dn" \
          "$(scrape $L other)" "$(scrape $L onePhoton)" "$(scrape $L twoPhoton)"
    done
@@ -154,7 +159,7 @@ done
 echo ""
 echo "  --- FCS Cluster on the same clusters (the control: it cannot learn) ---"
 for dn in "$nA" "$nB"; do
-   L="x_${nA}W_${dn}D.log"
+   L="x_${nA}W_${dn}D${rt}.log"
    printf "  %-22s %12s %12s %12s\n" "$dn data" "-" \
       "$(starEff $L onePhoton)" "$(starEff $L twoPhoton)"
 done
@@ -163,7 +168,7 @@ echo "================= same, purity(balanced) ================="
 printf "  %-22s %12s %12s %12s\n" "model \\ data" "other(had)" "onePhoton" "twoPhoton"
 for wn in "$nA" "$nB"; do
    for dn in "$nA" "$nB"; do
-      L="x_${wn}W_${dn}D.log"
+      L="x_${wn}W_${dn}D${rt}.log"
       printf "  %-22s %12s %12s %12s\n" "trained $wn -> $dn" \
          "$(scrape $L other 8)" "$(scrape $L onePhoton 8)" "$(scrape $L twoPhoton 8)"
    done
@@ -173,27 +178,29 @@ echo "  --- test half vs training half (leak / overtraining check) ---"
 for wn in "$nA" "$nB"; do
    for dn in "$nA" "$nB"; do
       printf "  %-22s test %-8s train %-8s\n" "trained $wn -> $dn" \
-         "$(scrape x_${wn}W_${dn}D.log other)" "$(scrape x_${wn}W_${dn}D_tr.log other)"
+         "$(scrape x_${wn}W_${dn}D${rt}.log other)" "$(scrape x_${wn}W_${dn}D${rt}_tr.log other)"
    done
 done
 echo ""
 echo "  --- class mix of each file (what plain purity is sensitive to) ---"
-grep -h "class mix of this sample" x_${nA}W_${nA}D.log x_${nA}W_${nB}D.log | sed 's/^/  /'
+grep -h "class mix of this sample" x_${nA}W_${nA}D${rt}.log x_${nA}W_${nB}D${rt}.log | sed 's/^/  /'
 
 # ---- 4. the figures: two models on one plot, once per dataset ---------------
 for dn in "$nA" "$nB"; do
-   a="x_${nA}W_${dn}D.root"; b="x_${nB}W_${dn}D.root"
+   a="x_${nA}W_${dn}D${rt}.root"; b="x_${nB}W_${dn}D${rt}.root"
    if [ -f "$a" ] && [ -f "$b" ]; then
       echo "== figures: both models on the $dn sample"
-      root4star -b -q "compareModels.C+(\"$a\",\"trained on $nA\",\"$b\",\"trained on $nB\",\"\",\"\",\"\",\"\",\"xcmp_on_${dn}\")" \
-         2>&1 | tee "xcmp_on_${dn}.log"
+      root4star -b -q "compareModels.C+(\"$a\",\"trained on $nA\",\"$b\",\"trained on $nB\",\"\",\"\",\"\",\"\",\"xcmp_on_${dn}${rt}\")" \
+         2>&1 | tee "xcmp_on_${dn}${rt}.log"
    fi
 done
 
 echo ""
 echo "== done."
 echo "   the 2x2 above        rows move -> the model; columns move -> the data"
-echo "   xcmp_on_${nA}.pdf / xcmp_on_${nB}.pdf   the same split, per energy bin"
+echo "   xcmp_on_${nA}${rt}.pdf / xcmp_on_${nB}${rt}.pdf  the same split, per energy bin"
+echo "   to overlay two RUNS (weighted vs not), point compareModels.C at"
+echo "   x_${nB}W_${nB}D.root and x_${nB}W_${nB}D_w0.root"
 echo "   xtrain_*.log         class counts and the flat-in-energy weight table"
 echo "   compare the class counts in the two xtrain logs first - with"
 echo "   NormMode=NumEvents they ARE the class prior the model learned"

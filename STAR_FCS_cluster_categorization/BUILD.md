@@ -1099,10 +1099,66 @@ evaluation:
   weighting in GENERATED energy, which is smooth for all three classes by
   construction while cluster energy is spiky for γ and π⁰ and smooth for π⁻.
 
-Until that is checked, `weightMode=0` is the better default for the MLP but not
-yet a settled choice. The BDTG has not been retabled under `weightMode=0` here;
-the earlier measurement had it losing only 7 points to the weighting against the
-MLP's 23, so it is far less sensitive and may not need the change.
+That check is the next section, and it settles it: drop the weighting.
+
+#### The efficiency-vs-energy curves: what the weighting actually fixes
+
+Read off the ePIC-style page of `x_mixW_mixD` with and without the weights
+(mix-trained, mix test half, both at the same gun-energy points):
+
+| gun E [GeV] | hadronic eff, **unweighted** | hadronic eff, **weighted** |
+|---|---|---|
+| 2 | 1.00 | 0.77 |
+| 10 | 0.97 | 0.73 |
+| 18 | 0.92 | 0.69 |
+| 30 | 0.92 | 0.69 |
+| 42 | 0.91 | 0.67 |
+| 58 | 0.89 | 0.67 |
+
+**The hadronic curve is already flat without the weights.** It sits at 0.89–0.94
+from 14 GeV to 60 GeV. The weighted curve is equally flat — at 0.67–0.73. So for
+this class the weighting removed no energy dependence; it simply moved the whole
+curve down by 23 points.
+
+Single EM is where it earns something, and only at the bottom of the range:
+
+| gun E [GeV] | single EM eff, **unweighted** | single EM eff, **weighted** |
+|---|---|---|
+| 2 | **0.00** | **0.59** |
+| 6 | **0.19** | **0.72** |
+| 10 | 0.73 | 0.80 |
+| 14 | 0.81 | 0.85 |
+| 22 | 0.86 | 0.86 |
+| 34 | 0.92 | 0.91 |
+| 50 | 0.95 | 0.95 |
+
+Below about 10 GeV the unweighted model gives up on single EM entirely — at
+2 GeV it calls essentially everything hadronic (hadronic efficiency 1.00,
+hadronic purity 0.30 in that bin). That **is** the energy prior the weighting
+was built to remove, and it removes it. Above ~20 GeV the two curves lie on top
+of one another, so there the weighting buys nothing at all while still costing
+23 points of hadronic and ~20 of single-EM purity.
+
+Merged π⁰ favours unweighted across the useful range (0.86 against 0.82 at the
+top end) and does not exist below ~15 GeV in either.
+
+#### Conclusion: drop the weighting, and mind the range instead
+
+The trade is narrow and one-sided. **Everything the flat-in-energy weighting buys
+is below ~10 GeV; everything it costs is everywhere.** And merged π⁰ — the class
+the classifier exists for — is unusable below about 15 GeV regardless (purity
+0.009 at 10 GeV). So the weighting improves performance in a region the analysis
+does not use and degrades it in the region it does.
+
+**Train with `weightMode=0` and quote results above ~15 GeV.** If low-energy
+single EM is ever needed for something else, the fix is a separate low-energy
+model or a weighting that only flattens the bottom of the spectrum — not a
+global reweighting that costs the hadronic class a quarter of its efficiency.
+
+Two things still open: the BDTG has not been retabled this way (it lost 7 points
+to the weighting against the MLP's 23, so it may be fine either way), and neither
+model has been run with a second random seed, so the 3-point merged-π⁰
+differences between training samples carry no measured spread.
 
 ### Open issue: seedFrac above 1
 
