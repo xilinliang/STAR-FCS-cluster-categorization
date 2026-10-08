@@ -81,10 +81,13 @@ nrm="${NORMMODE:-0}"
 wgt="${WEIGHTMODE:-1}"
 sfx="gen"; [ "$wgt" = "1" ] && sfx="genw"
 [ "$nrm" = "1" ] && sfx="${sfx}eq"
-# Output names carry the switches, so a WEIGHTMODE=0 or NORMMODE=1 run does not
-# overwrite the default run's .root files - you want both on disk to overlay
-# them with compareModels.C afterwards.
-rt=""; [ "$wgt" = "0" ] && rt="${rt}_w0"
+# Output names carry the METHOD and the switches, so a second run with different
+# ones does not overwrite the first - you want them all on disk to overlay with
+# compareModels.C afterwards. x_mixW_mixD_mlp.root and x_mixW_mixD_mlp_w0.root
+# are the weighted and unweighted MLP; _bdtg is the other method. Files from
+# before this change have no suffix at all.
+rt="_$(echo "$meth" | tr 'A-Z' 'a-z')"
+[ "$wgt" = "0" ] && rt="${rt}_w0"
 [ "$nrm" = "1" ] && rt="${rt}_eq"
 jA="X${nA}"; jB="X${nB}"
 wA="weights/${jA}${fset}${sfx}_${meth}.weights.xml"
@@ -109,7 +112,7 @@ for w in "$wA" "$wB"; do
 done
 
 # ---- 2. four evaluations, test half; plus the training half as a leak check --
-#   tag = x_<weights>W_<data>D[_w0][_eq][_tr]
+#   tag = x_<weights>W_<data>D_<method>[_w0][_eq][_tr]
 for wp in "$nA:$wA" "$nB:$wB"; do
    wn="${wp%%:*}"; w="${wp#*:}"
    for dp in "$nA:$fA" "$nB:$fB"; do
@@ -200,7 +203,7 @@ echo "== done."
 echo "   the 2x2 above        rows move -> the model; columns move -> the data"
 echo "   xcmp_on_${nA}${rt}.pdf / xcmp_on_${nB}${rt}.pdf  the same split, per energy bin"
 echo "   to overlay two RUNS (weighted vs not), point compareModels.C at"
-echo "   x_${nB}W_${nB}D.root and x_${nB}W_${nB}D_w0.root"
+echo "   x_${nB}W_${nB}D_<method>.root and x_${nB}W_${nB}D_<method>_w0.root"
 echo "   xtrain_*.log         class counts and the flat-in-energy weight table"
 echo "   compare the class counts in the two xtrain logs first - with"
 echo "   NormMode=NumEvents they ARE the class prior the model learned"
