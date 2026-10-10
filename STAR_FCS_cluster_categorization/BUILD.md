@@ -1231,6 +1231,89 @@ efficiency at 0.263 purity, merged π⁰ 0.197 efficiency, and no hadronic class
 all. The model roughly doubles single-EM efficiency at three times the purity,
 and takes merged π⁰ from 0.20 to 0.72.
 
+### Reference numbers: the recommended configuration
+
+Mixed sample, set 3, BDTG, `labelDef=1`, `weightMode=0`, `normMode=0`, held-out
+half. 56,491 clusters (13,139 skipped as "no label" — the resolved π⁰ photons and
+gun fragments, which labelDef=1 excludes by design).
+
+```csh
+root4star -b -q 'trainTMVA.C+("feat_pico_mix1.root","FcsCat",3,"clusters",0.8,0.5,1,0,0)'
+root4star -b -q 'evalCategory.C+("feat_pico_mix1.root","weights/FcsCat3gen_BDTG.weights.xml",3,"BDTG",1,"",0.5,0.8,"clusters",1,1)'
+```
+
+**BDTG** — rows true, columns assigned, each row a fraction of that true class:
+
+| true \ assigned | hadronic | single EM | merged π⁰ | clusters |
+|---|---|---|---|---|
+| hadronic (π⁻) | **0.943** | 0.029 | 0.028 | 20403 |
+| single EM (γ) | 0.080 | **0.852** | 0.068 | 19392 |
+| merged π⁰ | 0.104 | 0.173 | **0.723** | 16696 |
+
+| class | efficiency | purity | purity(balanced) |
+|---|---|---|---|
+| hadronic | 0.943 ± 0.002 | 0.854 ± 0.002 | 0.837 |
+| single EM | 0.852 ± 0.003 | 0.825 ± 0.003 | 0.808 |
+| merged π⁰ | 0.723 ± 0.003 | 0.865 ± 0.003 | 0.883 |
+
+**FCS Cluster (`catStar`) on the same clusters:**
+
+| true \ assigned | 0 ambiguous | 1 onePhoton | 2 twoPhoton |
+|---|---|---|---|
+| hadronic (π⁻) | 0.134 | **0.838** | 0.028 |
+| single EM (γ) | 0.572 | **0.426** | 0.002 |
+| merged π⁰ | 0.437 | 0.365 | **0.197** |
+
+| class | efficiency | purity | purity(balanced) |
+|---|---|---|---|
+| single EM | 0.426 ± 0.004 | 0.263 ± 0.002 | 0.262 |
+| merged π⁰ | 0.197 ± 0.003 | 0.845 ± 0.006 | 0.869 |
+
+Side by side: single EM efficiency **×2.0** at **×3.1** the purity, merged π⁰
+efficiency **×3.7** at the same purity, and a hadronic class that does not exist
+in `catStar` at all. The sharpest single number is in the π⁻ row — **STAR calls
+83.8 % of hadron clusters "one photon"; the BDTG calls 2.9 %.** A factor of 29
+less hadron contamination in the photon sample, which is where the one-photon
+point fit's fake rate comes from.
+
+#### Reading the off-diagonals
+
+The model's remaining errors are not symmetric and each has a reason:
+
+- **Merged π⁰ → single EM, 0.173.** The dominant loss, and largely irreducible:
+  below about one tower of separation the two photons genuinely make one
+  single-photon-shaped cluster. The separation table shows it turning on exactly
+  there (0.896 at 0.5–1.0 towers, 0.334 at 1.5–2.0).
+- **Merged π⁰ → hadronic, 0.104.** Less obvious. A wide, lumpy two-photon cluster
+  and a hadronic shower look alike in a 3×3 window; set 13's extra shape
+  variables may recover some of this, which is the case for retesting set 13
+  unweighted.
+- **Single EM → hadronic, 0.080.** Concentrated at low energy, where a few-tower
+  photon cluster carries almost no shape information. The efficiency-vs-energy
+  page shows single EM collapsing below ~10 GeV.
+- **Hadronic → anything, 0.057 total.** The hadronic class is nearly clean.
+
+#### A caveat on the per-gun table
+
+```
+  particle    clusters   events  <E_gen> GeV
+  gamma          19392    19188        35.06
+  pi0            16696    13704        42.82
+  pi-            20403    12683        35.93
+```
+
+The merged-π⁰ class has **⟨E_gen⟩ = 42.8 GeV against ~35 for the other two.** That
+is not a sample defect, it is the class definition: `labelDef=1` keeps only the
+π⁰ clusters holding *both* photons, and a π⁰ merges into one cluster only at high
+energy. So the three classes are not evaluated over the same energy range, and
+the merged-π⁰ numbers describe a higher-energy population than the others.
+Quote the efficiency-vs-energy pages alongside the summary, not the summary
+alone.
+
+The cluster-per-event ratios are also worth knowing: 1.01 for γ, 1.22 for π⁰
+(after the resolved pairs are dropped), 1.61 for π⁻. That last one is why equal
+event counts per species do not give equal cluster counts per class.
+
 ### Open issue: seedFrac above 1
 
 TMVA's variable summary in the set-3 training reports `seedFrac` with a maximum
