@@ -1002,8 +1002,13 @@ root4star -b -q 'runPicoDst_ml.C("<picoDst or .list>",-1,1,3,"weights/FcsCat3_BD
 
 ### 4b. On real data, end to end
 
+**Not yet exercised — there is no real data in this study.** Everything trained
+and evaluated so far is single-particle simulation. `runData.sh` is written and
+waiting; this section is the recipe for when a data picoDst exists, not a step
+that has been taken.
+
 ```bash
-./runData.sh st_physics_23045012.picoDst.root weights/FcsCat13genw_MLP.weights.xml 13 MLP
+./runData.sh st_physics_23045012.picoDst.root weights/FcsCat3gen_BDTG.weights.xml 3 BDTG
 ```
 
 Three steps: dump the features of the data clusters and QA them, apply the model,
@@ -1388,3 +1393,35 @@ Everything else that touches STAR classes — the chain macros, the g2t field
 access, the behaviour of `StFcsDbMaker` with `setDbAccess(0)` in a pico chain —
 is written from the `star-sw` sources and is only proven by your `cons` build and
 first run.
+
+### What "validated" does and does not mean here
+
+Every number in this file comes from **single-particle gun simulation**. No real
+data has been processed. Two consequences worth stating before any of these
+numbers leaves the group:
+
+**The model is trained and tested on the same simulated detector response.** Any
+place where the fast simulator's shower shapes differ from real ones transfers
+straight into the efficiencies. This is why the tower energies are stored as
+*fractions* of the cluster energy rather than raw GeV (see `kTowerFractions` in
+`StFcsClusterFeatures.h`) and why the set-4 position-leak check mattered: the
+features most tied to the simulator's absolute scale are the ones that will move
+most on data.
+
+**Every event has exactly one generated particle.** Real events have many, with
+overlapping showers, higher occupancy and a steeply falling energy spectrum
+rather than a flat or six-point one. `nNeighbor` in particular means something
+different in a crowded event than in a gun event, and the class prior the model
+inherits from the gun mixture (see NormMode above) is nothing like the class mix
+of real clusters.
+
+So the most transferable result here is **not** an absolute efficiency but the
+comparison against `catStar` on the *same* clusters: a relative improvement
+survives a simulation mismatch that would move both numbers together. Quote the
+ratio, caveat the absolutes.
+
+The realistic next validation, available without any data, is a **multi-particle
+simulation** — a physics generator (or at minimum a two-particle overlay) through
+the same chain, evaluated with a model trained on the gun samples. That measures
+the single-particle-to-crowded-event transfer directly, which is the largest
+untested assumption in the study.
