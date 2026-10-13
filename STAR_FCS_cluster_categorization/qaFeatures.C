@@ -19,13 +19,17 @@
 //     page 1        cluster overview: energy, generated energy, centroid maps
 //                   (north, south), nTowers, nNeighbor, FCS Cluster category,
 //                   true class
-//     gun pages     generated (gun) energy split by gun particle - gamma, pi0,
-//                   pi- - twice over: one entry per CLUSTER (top row, the
-//                   spectrum the training saw) and one entry per EVENT (bottom
-//                   row, the spectrum as thrown), then the three species
-//                   overlaid in both normalisations. The printed table gives
-//                   clusters per event, which is the whole difference between
-//                   the two rows
+//     gun pages     everything split by gun particle - gamma, pi0, pi-.
+//                   First page: generated energy, one entry per CLUSTER (top
+//                   row, the spectrum the training saw) and one per EVENT
+//                   (bottom row, the spectrum as thrown); the difference
+//                   between the rows is cluster multiplicity.
+//                   Second page: CLUSTER energy, and below it the containment
+//                   E_cluster / E_gen - near 1 for gamma, far below for pi-,
+//                   which is why a spiky generated spectrum does not make a
+//                   spiky spectrum of the variable the model actually sees.
+//                   Third page: the three species overlaid, all three
+//                   normalisations side by side.
 //     leak page     cluster centroid per gun particle, the check that must pass
 //                   before feature set 4 (position) can be believed
 //     next page     sigmaMax vs energy with STAR's category boundaries drawn on
@@ -319,6 +323,26 @@ void qaFeatures(const char* infile = "feat_pico.root",
    long gEvt[kNG];
    for (int g = 0; g < kNG; g++) gEvt[g] = 0;
 
+   // CLUSTER energy split by gun particle, and the containment fraction
+   // E_cluster / E_gen beside it. The fraction is the reason the two spectra
+   // do not look alike: a gamma puts nearly all of its energy into one cluster
+   // and keeps the gun's shape, while a pi- deposits a random fraction and
+   // smears a fixed gun energy across the whole range. So a spiky GENERATED
+   // spectrum does not imply a spiky spectrum of the variable the model
+   // actually sees.
+   TH1F* hEg[kNG];
+   TH1F* hFrac[kNG];
+   for (int g = 0; g < kNG; g++) {
+      hEg[g] = new TH1F(Form("hEg_%s", gName[g]),
+                        Form("cluster energy, %s gun;E [GeV];clusters", gName[g]),
+                        nEbin, 0, eTop);
+      hFrac[g] = new TH1F(Form("hFrac_%s", gName[g]),
+                          Form("E_{cluster} / E_{gen}, %s gun;E / E_{gen};clusters", gName[g]),
+                          60, 0, 1.5);
+      hEg[g]->SetLineColor(kQaGunColor[g]);
+      hFrac[g]->SetLineColor(kQaGunColor[g]);
+   }
+
    TH1F* hNTow = new TH1F("hNTow", "towers per cluster;nTowers;clusters", 40, 0.5, 40.5);
    TH1F* hNNb = new TH1F("hNNb", "neighbouring clusters;nNeighbor;clusters", 6, -0.5, 5.5);
    TH1F* hCat = new TH1F("hCat", "FCS Cluster category;category;clusters", 3, -0.5, 2.5);
@@ -412,7 +436,11 @@ void qaFeatures(const char* infile = "feat_pico.root",
       if (havePid) {
          const int g = (genPid == 1) ? 0 : (genPid == 7) ? 1 : (genPid == 9) ? 2 : -1;
          if (g >= 0) {
-            if (haveGen) hGenEg[g]->Fill(genE);
+            hEg[g]->Fill(e);
+            if (haveGen) {
+               hGenEg[g]->Fill(genE);
+               if (genE > 0) hFrac[g]->Fill(e / genE);
+            }
             hXYg[g]->Fill(x, y);
             gN[g] += 1;
             gX[g] += x;
@@ -483,8 +511,8 @@ void qaFeatures(const char* infile = "feat_pico.root",
    // thrown. The printed table gives the ratio, which is clusters per event.
    if (haveGen && havePid && (gN[0] + gN[1] + gN[2]) > 0) {
       printf("\n  generated (gun) energy per gun particle\n");
-      printf("  %-8s %10s %9s %9s %12s %12s\n", "gun", "clusters", "events",
-             "clu/event", "<Egen> clu", "<Egen> evt");
+      printf("  %-8s %10s %9s %9s %12s %12s %11s %10s\n", "gun", "clusters", "events",
+             "clu/event", "<Egen> clu", "<Egen> evt", "<E clu>", "<E/Egen>");
       for (int g = 0; g < kNG; g++) {
          if (gN[g] <= 0) continue;
          const double ne = (double)gEvt[g];
@@ -496,13 +524,15 @@ void qaFeatures(const char* infile = "feat_pico.root",
             snprintf(cpe, sizeof(cpe), "-");
             snprintf(mev, sizeof(mev), "-");
          }
-         printf("  %-8s %10.0f %9ld %9s %12.2f %12s\n", gName[g], gN[g], gEvt[g],
-                cpe, hGenEg[g]->GetMean(), mev);
+         printf("  %-8s %10.0f %9ld %9s %12.2f %12s %11.2f %10.3f\n", gName[g], gN[g], gEvt[g],
+                cpe, hGenEg[g]->GetMean(), mev, hEg[g]->GetMean(), hFrac[g]->GetMean());
       }
       if (!haveEvt)
          printf("  (no run/event branch in this file - the per-event row is empty)\n");
       printf("  clu/event above 1 is why the per-cluster spectrum is not the generated one:\n"
-             "  a pi- event contributes more entries than a gamma event of the same energy\n");
+             "  a pi- event contributes more entries than a gamma event of the same energy.\n"
+             "  <E/Egen> is the containment: near 1 for gamma, far below for pi-, which is why\n"
+             "  a spiky GENERATED spectrum does not make a spiky CLUSTER spectrum for hadrons\n");
 
       cv->Clear();
       cv->Divide(3, 2);
@@ -527,24 +557,44 @@ void qaFeatures(const char* infile = "feat_pico.root",
       }
       cv->Print(pdf);
 
-      // the three species over one another, both normalisations
+      // cluster energy per gun particle, with the containment fraction below it
       cv->Clear();
-      cv->Divide(2, 1);
-      for (int pane = 0; pane < 2; pane++) {
+      cv->Divide(3, 2);
+      for (int g = 0; g < kNG; g++) {
+         cv->cd(g + 1);
+         gPad->SetLeftMargin(0.15);
+         hEg[g]->SetLineWidth(2);
+         hEg[g]->Draw("hist");
+         keep.push_back(hEg[g]);
+
+         cv->cd(g + 4);
+         gPad->SetLeftMargin(0.15);
+         hFrac[g]->SetLineWidth(2);
+         hFrac[g]->Draw("hist");
+         keep.push_back(hFrac[g]);
+      }
+      cv->Print(pdf);
+
+      // the three species over one another, all three normalisations
+      cv->Clear();
+      cv->Divide(3, 1);
+      for (int pane = 0; pane < 3; pane++) {
          cv->cd(pane + 1);
          gPad->SetLeftMargin(0.13);
          TLegend* lg = new TLegend(0.62, 0.70, 0.90, 0.89);
          lg->SetBorderSize(0);
          lg->SetFillStyle(0);
+         const char* ovTitle[3] = {"cluster energy;E [GeV];clusters",
+                                   "generated energy, per cluster;E_{gen} [GeV];clusters",
+                                   "generated energy, per event;E_{gen} [GeV];events"};
          double top = 0;
          for (int g = 0; g < kNG; g++) {
-            TH1F* h = (pane == 0) ? hGenEg[g] : hGenEvt[g];
+            TH1F* h = (pane == 0) ? hEg[g] : (pane == 1) ? hGenEg[g] : hGenEvt[g];
             if (h->GetMaximum() > top) top = h->GetMaximum();
          }
          for (int g = 0; g < kNG; g++) {
-            TH1F* h = (pane == 0) ? hGenEg[g] : hGenEvt[g];
-            h->SetTitle(pane == 0 ? "generated energy, per cluster;E_{gen} [GeV];clusters"
-                                  : "generated energy, per event;E_{gen} [GeV];events");
+            TH1F* h = (pane == 0) ? hEg[g] : (pane == 1) ? hGenEg[g] : hGenEvt[g];
+            h->SetTitle(ovTitle[pane]);
             h->SetMaximum(1.15 * top);
             h->SetLineWidth(2);
             h->Draw(g == 0 ? "hist" : "hist same");
