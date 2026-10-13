@@ -19,13 +19,24 @@
 //     page 1        cluster overview: energy, generated energy, centroid maps
 //                   (north, south), nTowers, nNeighbor, FCS Cluster category,
 //                   true class
-//     page 2        sigmaMax vs energy with STAR's category boundaries drawn on
+//     gun pages     generated (gun) energy split by gun particle - gamma, pi0,
+//                   pi- - twice over: one entry per CLUSTER (top row, the
+//                   spectrum the training saw) and one entry per EVENT (bottom
+//                   row, the spectrum as thrown), then the three species
+//                   overlaid in both normalisations. The printed table gives
+//                   clusters per event, which is the whole difference between
+//                   the two rows
+//     leak page     cluster centroid per gun particle, the check that must pass
+//                   before feature set 4 (position) can be believed
+//     next page     sigmaMax vs energy with STAR's category boundaries drawn on
 //     set 3 pages   the linear correlation matrix of the inputs, then every
 //                   variable split by true class (unit area), then every
 //                   variable against cluster energy (all clusters)
 //     set 13 pages  the same for set 13
 //   <out>.root  every histogram
-//   printed     per set, the correlation matrix (with the strongest pair
+//   printed     the per-gun-particle tables (clusters, events, clusters per
+//               event, mean generated energy; and the centroid means and RMS),
+//               then per set, the correlation matrix (with the strongest pair
 //               flagged when it exceeds 95 %), and a table per variable:
 //               entries, non-finite values,
 //               min / max / mean / rms, the fraction sitting at the most
@@ -74,6 +85,8 @@ namespace {
 const int kNCls = 4;
 const char* kQaClsName[kNCls] = {"other", "onePhoton", "twoPhoton", "no truth"};
 const int kQaClsColor[kNCls] = {kGray + 2, kAzure + 1, kOrange + 7, kMagenta + 1};
+// gun particles: gamma, pi0, pi-
+const int kQaGunColor[3] = {kAzure + 1, kOrange + 7, kGray + 2};
 
 bool bad(float v) { return v != v || fabs(v) > 1e30; }
 
@@ -213,6 +226,14 @@ void qaFeatures(const char* infile = "feat_pico.root",
    if (haveGen) in->SetBranchAddress("genE", &genE);
    const bool havePid = (in->GetBranch("genPid") != 0);
    if (havePid) in->SetBranchAddress("genPid", &genPid);
+   // run and event are needed only to count each event once for the per-EVENT
+   // generated-energy page; the per-cluster pages do not use them.
+   Int_t run = 0, event = 0;
+   const bool haveEvt = (in->GetBranch("run") != 0 && in->GetBranch("event") != 0);
+   if (haveEvt) {
+      in->SetBranchAddress("run", &run);
+      in->SetBranchAddress("event", &event);
+   }
 
    // ------------------------------------------------------- energy axis
    //
@@ -268,6 +289,36 @@ void qaFeatures(const char* infile = "feat_pico.root",
    double gN[kNG], gX[kNG], gY[kNG], gXX[kNG], gYY[kNG];
    for (int g = 0; g < kNG; g++) gN[g] = gX[g] = gY[g] = gXX[g] = gYY[g] = 0;
 
+   // Generated (gun) energy split by gun particle, twice over.
+   //
+   //   hGenEg[g]  one entry per CLUSTER. genE is an event quantity copied onto
+   //              every cluster of the event, so an event making two clusters
+   //              counts twice. This is the spectrum the TRAINING sees, because
+   //              training is per cluster - which is why it is the one to look
+   //              at when asking what the model was fed.
+   //   hGenEvt[g] one entry per EVENT. The generated spectrum as thrown, with
+   //              the cluster-multiplicity weighting removed. Dividing the two
+   //              gives clusters per event against energy.
+   //
+   // The two differ by more than a constant: pi- makes 1.6 clusters per event
+   // and gamma 1.0, and the ratio itself grows with energy, so the per-cluster
+   // spectrum is tilted towards pi- and towards high energy relative to what
+   // was actually generated.
+   TH1F* hGenEg[kNG];
+   TH1F* hGenEvt[kNG];
+   for (int g = 0; g < kNG; g++) {
+      hGenEg[g] = new TH1F(Form("hGenEg_%s", gName[g]),
+                           Form("generated energy, %s gun;E_{gen} [GeV];clusters", gName[g]),
+                           nEbin, 0, eTop);
+      hGenEvt[g] = new TH1F(Form("hGenEvt_%s", gName[g]),
+                            Form("generated energy, %s gun;E_{gen} [GeV];events", gName[g]),
+                            nEbin, 0, eTop);
+      hGenEg[g]->SetLineColor(kQaGunColor[g]);
+      hGenEvt[g]->SetLineColor(kQaGunColor[g]);
+   }
+   long gEvt[kNG];
+   for (int g = 0; g < kNG; g++) gEvt[g] = 0;
+
    TH1F* hNTow = new TH1F("hNTow", "towers per cluster;nTowers;clusters", 40, 0.5, 40.5);
    TH1F* hNNb = new TH1F("hNNb", "neighbouring clusters;nNeighbor;clusters", 6, -0.5, 5.5);
    TH1F* hCat = new TH1F("hCat", "FCS Cluster category;category;clusters", 3, -0.5, 2.5);
@@ -280,9 +331,31 @@ void qaFeatures(const char* infile = "feat_pico.root",
    int trow[NW * NW], tcol[NW * NW];
    Long64_t nRead = 0, nLowE = 0, nNoFeat[nSet] = {0, 0};
    const Long64_t n = in->GetEntries();
+   int prevRun = -1, prevEvent = -1;
+   bool firstEntry = true;
    for (Long64_t i = 0; i < n; i++) {
       in->GetEntry(i);
       nRead++;
+
+      // One entry per EVENT, counted before any cluster cut, so this page shows
+      // the generated spectrum of the sample rather than the spectrum of the
+      // clusters that survived. Clusters of one event are consecutive in the
+      // tree (the dumpers fill event by event), so a change of (run, event) is
+      // a new event. Events that produced NO cluster entry at all never reach
+      // the tree and cannot be counted here.
+      if (haveGen && havePid && haveEvt) {
+         if (firstEntry || run != prevRun || event != prevEvent) {
+            const int ge = (genPid == 1) ? 0 : (genPid == 7) ? 1 : (genPid == 9) ? 2 : -1;
+            if (ge >= 0) {
+               hGenEvt[ge]->Fill(genE);
+               gEvt[ge]++;
+            }
+            prevRun = run;
+            prevEvent = event;
+            firstEntry = false;
+         }
+      }
+
       if (e < eMin) {
          nLowE++;
          continue;
@@ -339,6 +412,7 @@ void qaFeatures(const char* infile = "feat_pico.root",
       if (havePid) {
          const int g = (genPid == 1) ? 0 : (genPid == 7) ? 1 : (genPid == 9) ? 2 : -1;
          if (g >= 0) {
+            if (haveGen) hGenEg[g]->Fill(genE);
             hXYg[g]->Fill(x, y);
             gN[g] += 1;
             gX[g] += x;
@@ -401,6 +475,85 @@ void qaFeatures(const char* infile = "feat_pico.root",
       nt.DrawLatexNDC(0.25, 0.5, "no genE branch in this file");
    }
    cv->Print(pdf + "(");
+
+   // ---- generated energy per gun particle, per cluster and per event ------
+   //
+   // Two rows of three. Top: one entry per cluster, which is the spectrum the
+   // training actually saw. Bottom: one entry per event, the spectrum as
+   // thrown. The printed table gives the ratio, which is clusters per event.
+   if (haveGen && havePid && (gN[0] + gN[1] + gN[2]) > 0) {
+      printf("\n  generated (gun) energy per gun particle\n");
+      printf("  %-8s %10s %9s %9s %12s %12s\n", "gun", "clusters", "events",
+             "clu/event", "<Egen> clu", "<Egen> evt");
+      for (int g = 0; g < kNG; g++) {
+         if (gN[g] <= 0) continue;
+         const double ne = (double)gEvt[g];
+         char cpe[32], mev[32];
+         if (ne > 0) {
+            snprintf(cpe, sizeof(cpe), "%.3f", gN[g] / ne);
+            snprintf(mev, sizeof(mev), "%.2f", hGenEvt[g]->GetMean());
+         } else {
+            snprintf(cpe, sizeof(cpe), "-");
+            snprintf(mev, sizeof(mev), "-");
+         }
+         printf("  %-8s %10.0f %9ld %9s %12.2f %12s\n", gName[g], gN[g], gEvt[g],
+                cpe, hGenEg[g]->GetMean(), mev);
+      }
+      if (!haveEvt)
+         printf("  (no run/event branch in this file - the per-event row is empty)\n");
+      printf("  clu/event above 1 is why the per-cluster spectrum is not the generated one:\n"
+             "  a pi- event contributes more entries than a gamma event of the same energy\n");
+
+      cv->Clear();
+      cv->Divide(3, 2);
+      for (int g = 0; g < kNG; g++) {
+         cv->cd(g + 1);
+         gPad->SetLeftMargin(0.15);
+         hGenEg[g]->SetLineWidth(2);
+         hGenEg[g]->Draw("hist");
+         keep.push_back(hGenEg[g]);
+
+         cv->cd(g + 4);
+         gPad->SetLeftMargin(0.15);
+         hGenEvt[g]->SetLineWidth(2);
+         hGenEvt[g]->Draw("hist");
+         keep.push_back(hGenEvt[g]);
+         if (!haveEvt) {
+            TLatex nb;
+            nb.SetNDC();
+            nb.SetTextSize(0.055);
+            nb.DrawLatexNDC(0.18, 0.5, "no run/event branch");
+         }
+      }
+      cv->Print(pdf);
+
+      // the three species over one another, both normalisations
+      cv->Clear();
+      cv->Divide(2, 1);
+      for (int pane = 0; pane < 2; pane++) {
+         cv->cd(pane + 1);
+         gPad->SetLeftMargin(0.13);
+         TLegend* lg = new TLegend(0.62, 0.70, 0.90, 0.89);
+         lg->SetBorderSize(0);
+         lg->SetFillStyle(0);
+         double top = 0;
+         for (int g = 0; g < kNG; g++) {
+            TH1F* h = (pane == 0) ? hGenEg[g] : hGenEvt[g];
+            if (h->GetMaximum() > top) top = h->GetMaximum();
+         }
+         for (int g = 0; g < kNG; g++) {
+            TH1F* h = (pane == 0) ? hGenEg[g] : hGenEvt[g];
+            h->SetTitle(pane == 0 ? "generated energy, per cluster;E_{gen} [GeV];clusters"
+                                  : "generated energy, per event;E_{gen} [GeV];events");
+            h->SetMaximum(1.15 * top);
+            h->SetLineWidth(2);
+            h->Draw(g == 0 ? "hist" : "hist same");
+            lg->AddEntry(h, gName[g], "l");
+         }
+         lg->Draw();
+      }
+      cv->Print(pdf);
+   }
 
    // ---- centroid per gun particle: the leakage check for feature set 4 ----
    if (havePid && (gN[0] + gN[1] + gN[2]) > 0) {
