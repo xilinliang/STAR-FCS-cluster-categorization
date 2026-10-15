@@ -1392,15 +1392,63 @@ root4star -b -q 'evalCategory.C+("feat_pico_mix1.root","weights/FcsCat3genw_BDTG
 ```
 
 and compare the hadronic-versus-cluster-energy curve with the unweighted one
-above. If the weighted model holds up better over 25–40 GeV, the weighting was
-doing real work in the region that matters for data, and the recommendation
-needs revisiting. If both collapse, the weighting never addressed this and the
-problem is the sample's energy coverage, as argued above.
+above. That run is below, and the answer is neither of the two outcomes
+anticipated here.
 
 Note also the merged-π⁰ dip at 14–22 GeV (0.61 at 10, 0.44 at 22, rising to 0.87
 by 38). At those energies the two photons are 1.5–3 towers apart and mostly
 resolved, so a cluster holding both is an unusual topology; the class is thin
 and odd there rather than easy.
+
+#### The weighted model, same axis: it fails the other way
+
+Read off the figures (BDTG set 3, mix, held-out half, cluster-energy axis):
+
+| cluster E [GeV] | unweighted eff | weighted eff | unweighted purity | weighted purity |
+|---|---|---|---|---|
+| 10 | 0.85 | 0.86 | 0.83 | 0.82 |
+| 18 | 0.83 | 0.85 | 0.85 | 0.77 |
+| 22 | 0.79 | 0.86 | 0.83 | 0.63 |
+| 26 | 0.73 | 0.85 | 0.76 | 0.53 |
+| 30 | 0.67 | 0.84 | 0.74 | 0.23 |
+| 34 | 0.50 | 0.87 | 0.74 | 0.18 |
+| 38 | 0.37 | 0.70 | 0.62 | 0.13 |
+| 42 | ~0.08 | 0.71 | 0.50 | 0.10 |
+
+**The weighting does attack the prior.** Hadronic efficiency stays flat near 0.85
+all the way to 46 GeV instead of collapsing — so the first reading was right that
+the flat-in-energy weighting targets exactly this.
+
+**But it buys that efficiency by calling high-energy EM clusters hadronic.**
+Hadronic purity falls to 0.23 at 30 GeV and 0.10 by 42. On efficiency × purity
+the unweighted model is ahead everywhere above 10 GeV (at 34 GeV: 0.37 against
+0.16) and the two tie below it. The weighted model is also worse on merged π⁰
+through the middle of the range, 0.25–0.45 against 0.44–0.85 over 18–38 GeV.
+
+**So neither model identifies high-energy hadrons — they fail in opposite
+directions.** Unweighted, the model refuses to call anything hadronic up there
+and keeps its purity. Weighted, the few high-energy π⁻ clusters are up-weighted
+so hard that the model smears hadronic calls across the EM population. Both are
+the same disease: above ~30 GeV **there is almost no hadronic truth in the
+sample to learn from**, and a weight cannot create it.
+
+**Conclusions.**
+
+1. `weightMode=0` stands as the recommendation — now for a measured reason
+   rather than the generated-energy argument, which could not see any of this.
+2. The honest statement of the hadronic result is unchanged: **0.943 overall,
+   0.73–0.88 in the 10–25 GeV overlap band, and no useful hadronic
+   identification above ~30 GeV in either configuration.**
+3. **The `weightMode=2` variant is withdrawn.** The problem is not the
+   per-class renormalisation detail; it is missing data, and no reweighting
+   scheme fixes that.
+4. The π⁻ generation at 100–200 GeV is no longer one option among several. It
+   is the only thing that addresses this, and it should go to the top of the
+   list.
+
+One caveat on the table: the π⁻ cluster spectrum is nearly empty above 40 GeV,
+so the last two rows carry few clusters and wide errors in both columns. The
+26–38 GeV rows are the solid evidence, and they say the same thing.
 
 ### Open issue: seedFrac above 1
 
