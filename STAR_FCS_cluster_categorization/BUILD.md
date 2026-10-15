@@ -1319,6 +1319,89 @@ The cluster-per-event ratios are also worth knowing: 1.01 for γ, 1.22 for π⁰
 (after the resolved pairs are dropped), 1.61 for π⁻. That last one is why equal
 event counts per species do not give equal cluster counts per class.
 
+### Efficiency against CLUSTER energy: the hadronic number is partly a prior
+
+The summary table quotes hadronic efficiency 0.943. Evaluated against *cluster*
+energy rather than generated energy (`energyAxis=0`), that number comes apart:
+
+| cluster E [GeV] | hadronic efficiency |
+|---|---|
+| 2 | 1.00 |
+| 6 | 0.93 |
+| 10 | 0.85 |
+| 18 | 0.83 |
+| 26 | 0.73 |
+| 30 | 0.67 |
+| 34 | 0.50 |
+| 38 | 0.37 |
+| 42 | ~0.08 |
+| 46 | 0.00 |
+
+Single EM runs the other way over the same axis — 0.00 at 2 GeV, 0.11 at 6, 0.78
+at 10, and 0.96 from 40 GeV up — and the two cross at about 10–15 GeV.
+
+**That shape is the signature of a class prior in cluster energy, not of shower
+shape.** In this sample π⁻ clusters pile up below 10 GeV (gun ≤ 60 GeV × 10–20 %
+containment) and vanish above ~40, while γ and merged π⁰ fill the top of the
+range. A model that learns "low energy ⇒ hadronic, high energy ⇒ EM" scores very
+well here, and 0.943 is dominated by the enormous low-energy π⁻ population
+rather than by the model telling showers apart.
+
+Two things support that reading over the alternative ("high-energy hadronic
+clusters are just intrinsically hard"). A 40 GeV hadronic deposit is *wider* and
+messier than a 40 GeV photon, so shape should separate it easily — failing there
+means the energy evidence is overwhelming the shape evidence. And `e` is the
+**second-ranked** BDTG input (importance 0.150, behind only `sigmaMin`), while
+the MLP ranks it 11th and scores 2.9 points lower on hadronic efficiency. The
+gap between the two methods is about the size of the shortcut.
+
+**How to quote it.** Overall 0.943, and **0.73–0.88 in the 10–25 GeV band where
+all three classes actually overlap**. The second number is the shape-driven
+performance and is the one that will survive contact with data. Above ~35 GeV
+the model is effectively blind to hadrons.
+
+Caveat on the last two rows: the π⁻ cluster spectrum is nearly empty above
+40 GeV, so the 42 and 46 GeV points carry few clusters and large errors. The
+collapse from 26 to 38 GeV (0.73 → 0.67 → 0.50 → 0.37) is on solid statistics
+and is the real evidence.
+
+#### Why this matters for data, and the fix
+
+Real events contain hadrons far above 60 GeV, which make 30–60 GeV ECal
+clusters. This model has seen essentially no hadronic cluster in that range and
+will call them EM — which is exactly the fake rate the categorization exists to
+reduce. The honest fix is in the generation: **π⁻ (and π⁰, γ) guns at 100–200
+GeV**, so hadronic clusters populate 30–60 GeV and the classes overlap in
+cluster energy across the whole range. Training tricks are a second best.
+
+#### This partly reopens the weighting decision
+
+The flat-in-energy weighting was, among other things, an attempt to remove
+exactly this prior: `w = 1/N(class, E bin)` in CLUSTER energy flattens each
+class separately, which equalises the class mix inside each bin wherever all
+three classes exist. When it was dropped, the comparison was made on overall
+numbers and on efficiency against *generated* energy — and for π⁻ the generated
+energy is not the cluster energy, so that view could not show this effect at
+all.
+
+So the 4.6-point hadronic cost of the weighting on BDTG (23 on MLP) may be
+partly the removal of an artifact rather than pure loss. The check is one run:
+
+```csh
+root4star -b -q 'evalCategory.C+("feat_pico_mix1.root","weights/FcsCat3genw_BDTG.weights.xml",3,"BDTG",1,"eCluAxis_w",0.5,0.8,"clusters",1,0)'
+```
+
+and compare the hadronic-versus-cluster-energy curve with the unweighted one
+above. If the weighted model holds up better over 25–40 GeV, the weighting was
+doing real work in the region that matters for data, and the recommendation
+needs revisiting. If both collapse, the weighting never addressed this and the
+problem is the sample's energy coverage, as argued above.
+
+Note also the merged-π⁰ dip at 14–22 GeV (0.61 at 10, 0.44 at 22, rising to 0.87
+by 38). At those energies the two photons are 1.5–3 towers apart and mostly
+resolved, so a cluster holding both is an unusual topology; the class is thin
+and odd there rather than easy.
+
 ### Open issue: seedFrac above 1
 
 TMVA's variable summary in the set-3 training reports `seedFrac` with a maximum
