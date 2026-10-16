@@ -141,6 +141,7 @@
 
 #include "StRoot/StFcsMLCategoryMaker/StFcsClusterFeatures.h"
 #include "StRoot/StFcsMLCategoryMaker/StFcsTrainTestSplit.h"
+#include "StRoot/StFcsMLCategoryMaker/StFcsEnergyWeights.h"
 
 void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
                const char* jobname = "FcsCat",
@@ -220,11 +221,9 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    // ---------------------------------------------------- training weights
    // Bin edges in CLUSTER energy: fine where the class mix changes fastest,
    // coarse where it does not. The last bin is open-ended.
-   const int kNWB = 14;
-   const double wEdge[kNWB + 1] = {0.0, 1, 2, 3, 5,  7,  10, 15,
-                                   20,  25, 30, 40, 50, 60, 1e9};
-   const int kMinBin = 50;    // fewer clusters than this: merge into the neighbour
-   const double kWCap = 10.0; // cap a weight at this times the class median
+   // The recipe itself lives in StFcsEnergyWeights.h, so that qaWeights.C
+   // draws exactly the weights this macro applies.
+   using StFcsEnergyWeights::kNWB;
    double wCount[3][kNWB];
    for (int c = 0; c < 3; c++)
       for (int b = 0; b < kNWB; b++) wCount[c][b] = 0;
@@ -346,8 +345,7 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
          continue;
       }
       // which energy bin this cluster belongs to
-      int eb = 0;
-      while (eb < kNWB - 1 && e >= wEdge[eb + 1]) eb++;
+      const int eb = StFcsEnergyWeights::bin(e);
       if (counting) {
          wCount[cls][eb] += 1;
          continue;
@@ -365,76 +363,9 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
 
    // ---- end of the counting pass: turn the counts into weights ----
    if (counting) {
-      printf("\n--- flat-in-energy training weights (bins of CLUSTER energy) ---\n");
-      printf("  %-11s %8s %9s %9s %9s %7s %7s\n", "class", "clusters", "bins used", "min w", "max w",
-             "merged", "capped");
-      for (int c = 0; c < 3; c++) {
-         // merge a bin with too few clusters into the next one up, so a
-         // handful of clusters cannot become a huge weight
-         double nEff[kNWB];
-         int owner[kNWB];  // which bin a cluster of this bin is counted in
-         for (int b = 0; b < kNWB; b++) {
-            nEff[b] = wCount[c][b];
-            owner[b] = b;
-         }
-         int nMerged = 0;
-         for (int b = 0; b < kNWB - 1; b++) {
-            if (nEff[b] <= 0 || nEff[b] >= kMinBin) continue;
-            nEff[b + 1] += nEff[b];
-            nEff[b] = 0;
-            for (int q = 0; q <= b; q++)
-               if (owner[q] == b) owner[q] = b + 1;
-            nMerged++;
-         }
-         // the last bin cannot merge upward: fold it downward instead
-         if (nEff[kNWB - 1] > 0 && nEff[kNWB - 1] < kMinBin) {
-            for (int b = kNWB - 2; b >= 0; b--) {
-               if (nEff[b] <= 0) continue;
-               nEff[b] += nEff[kNWB - 1];
-               nEff[kNWB - 1] = 0;
-               for (int q = 0; q < kNWB; q++)
-                  if (owner[q] == kNWB - 1) owner[q] = b;
-               nMerged++;
-               break;
-            }
-         }
-         double total = 0;
-         int nUsed = 0;
-         for (int b = 0; b < kNWB; b++) {
-            total += nEff[b];
-            if (nEff[b] > 0) nUsed++;
-         }
-         if (total <= 0 || nUsed == 0) continue;
-         // equal total weight in every populated bin, mean weight 1
-         std::vector<double> ws;
-         for (int b = 0; b < kNWB; b++) {
-            const double nb = nEff[owner[b]];
-            wVal[c][b] = (nb > 0) ? (total / nUsed) / nb : 1.0;
-            if (wCount[c][b] > 0) ws.push_back(wVal[c][b]);
-         }
-         std::sort(ws.begin(), ws.end());
-         const double med = ws.empty() ? 1.0 : ws[ws.size() / 2];
-         int nCap = 0;
-         double lo = 1e30, hi = 0;
-         for (int b = 0; b < kNWB; b++) {
-            if (wCount[c][b] <= 0) continue;
-            if (wVal[c][b] > kWCap * med) {
-               wVal[c][b] = kWCap * med;
-               nCap++;
-            }
-            if (wVal[c][b] < lo) lo = wVal[c][b];
-            if (wVal[c][b] > hi) hi = wVal[c][b];
-         }
-         // renormalise so the average weight of this class is 1, which keeps
-         // TMVA's own NormMode doing what it did before
-         double sw = 0;
-         for (int b = 0; b < kNWB; b++) sw += wCount[c][b] * wVal[c][b];
-         const double scale = (sw > 0) ? (total / sw) : 1.0;
-         for (int b = 0; b < kNWB; b++) wVal[c][b] *= scale;
-         printf("  %-11s %8.0f %9d %9.3g %9.3g %7d %7d\n", clsname[c], total, nUsed, lo * scale, hi * scale,
-                nMerged, nCap);
-      }
-      printf("  a class whose clusters all sit in one energy bin gets weight 1 everywhere\n");
+      StFcsEnergyWeights::Report rep[3];
+      StFcsEnergyWeights::build(wCount, wVal, rep);
+      StFcsEnergyWeights::printTable(rep, clsname);
    }
    }  // pass
    // ------------------------------------------------------------ accounting

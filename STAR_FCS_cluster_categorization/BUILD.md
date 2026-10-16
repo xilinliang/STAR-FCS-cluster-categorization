@@ -1450,6 +1450,44 @@ One caveat on the table: the π⁻ cluster spectrum is nearly empty above 40 GeV
 so the last two rows carry few clusters and wide errors in both columns. The
 26–38 GeV rows are the solid evidence, and they say the same thing.
 
+### QA of the weighting itself: what the training sample became
+
+`qaWeights.C` draws the sample the model is actually fed. **Every distribution
+appears twice on the same pad — dashed unweighted, solid weighted, over the same
+clusters — so the gap between the two curves is the weighting.**
+
+```csh
+root4star -b -q 'qaWeights.C+("feat_pico_mix1.root","qaw_mix1")'
+# (infile, out, featureSet, eMin, labelDef, treename, purityCut, eMax)
+```
+
+Only the **training half** is read: that is the sample the weights act on, and
+the test half is never weighted.
+
+| page | what it shows | what to look for |
+|---|---|---|
+| 1 | the weight itself against cluster energy, one line per class | where it rises above 1 — those are the bins the training is told to believe harder |
+| 2 | cluster energy per class, weighted over unweighted | the weighted curves should be flat; that is the recipe working, and the check that it did |
+| 3 | class share in each energy bin, unweighted pane then weighted pane | **the money plot.** If cluster energy carries class information the unweighted pane shows it; the weighted pane should sit near the 1/3 line wherever all three classes exist |
+| 4 | effective clusters over raw clusters per bin | where the weighting spends statistics: 1 means it costs nothing there |
+| 5+ | every input variable, one page per class | whether the weighting reshaped an input, not just the energy |
+
+The printed output adds the weight table and, per class, the raw count beside
+the effective count (Σw)² / Σw² — how much independent evidence survives.
+
+Page 3 is the one that answers the question the weighting exists for. Page 4 is
+the one that shows its price. Read them together: a bin where the share is fixed
+but the effective statistics collapse is a bin where the model is being told to
+be confident about almost nothing.
+
+**One header, two users.** The recipe now lives in
+`StRoot/StFcsMLCategoryMaker/StFcsEnergyWeights.h` — bin edges, the thin-bin
+merge, the 1/N formula, the 10× cap, the renormalisation — and both
+`trainTMVA.C` and `qaWeights.C` call it. The QA therefore cannot drift from what
+was trained, the same reason `StFcsClusterFeatures.h` holds the input variables
+and `StFcsTrainTestSplit.h` the labels. `trainTMVA.C` behaves exactly as before;
+only the duplicate code is gone.
+
 ### Open issue: seedFrac above 1
 
 TMVA's variable summary in the set-3 training reports `seedFrac` with a maximum
