@@ -18,9 +18,13 @@
 //   <out>.pdf
 //     page 1   the weight itself against cluster energy, one line per class,
 //              with the cap marked
-//     page 2   cluster energy per class, weighted over unweighted. The
+//     page 2   ECal cluster energy, one pad per class with weighted over
+//              unweighted, then a fourth pad with all three classes weighted
+//              on one log axis so the kinds compare with each other. The
 //              weighted curves are flat by construction - that is the recipe
 //              working, and the check that it did
+//     page 2b  the same four unweighted, on log axes: the before picture,
+//              where the hadronic class dies above ~40 GeV
 //     page 3   class composition in each energy bin, unweighted then weighted.
 //              THE plot: if cluster energy carries class information, the
 //              unweighted pad shows it and the weighted pad should not
@@ -320,16 +324,21 @@ void qaWeights(const char* infile = "feat_pico_mix1.root", const char* outName =
       nt.DrawLatexNDC(0.12, 0.84, "flat weight 1 = unweighted; above it the bin is upweighted");
       cv->Print(pdf + "(");
 
-      // ---- page 2: cluster energy per class, weighted over unweighted ----
+      // ---- page 2: ECal cluster energy per class ----
+      // Three pads, each class against its own unweighted self, then a fourth
+      // with all three weighted on one axis so the kinds can be compared with
+      // each other and not only with themselves. Log y there: the raw spectra
+      // span three decades, and the point of the pad is the shape at the top
+      // of the range, where the hadronic class runs out.
       cv->Clear();
-      cv->Divide(3, 1);
+      cv->Divide(4, 1);
       for (int c = 0; c < kNC; c++) {
          cv->cd(c + 1);
-         gPad->SetLeftMargin(0.15);
+         gPad->SetLeftMargin(0.17);
          styleU(hEu[c], kCColor[c]);
          styleW(hEw[c], kCColor[c]);
          drawPair(hEu[c], hEw[c]);
-         TLegend* lg = new TLegend(0.45, 0.76, 0.90, 0.89);
+         TLegend* lg = new TLegend(0.40, 0.76, 0.92, 0.89);
          lg->SetBorderSize(0);
          lg->SetFillStyle(0);
          lg->AddEntry(hEu[c], "unweighted", "l");
@@ -337,6 +346,75 @@ void qaWeights(const char* infile = "feat_pico_mix1.root", const char* outName =
          lg->Draw();
          keep.push_back(hEu[c]);
          keep.push_back(hEw[c]);
+      }
+      cv->cd(4);
+      gPad->SetLeftMargin(0.17);
+      gPad->SetLogy();
+      {
+         double top = 0, bot = 1e30;
+         for (int c = 0; c < kNC; c++) {
+            if (hEw[c]->GetMaximum() > top) top = hEw[c]->GetMaximum();
+            for (int bb = 1; bb <= nEbin; bb++) {
+               const double q = hEw[c]->GetBinContent(bb);
+               if (q > 0 && q < bot) bot = q;
+            }
+         }
+         if (!(bot < top)) { bot = 0.5; top = 10; }
+         TH1F* frE = new TH1F("frEall", "all classes, weighted;cluster energy [GeV];weighted clusters",
+                              nEbin, 0, eTop);
+         frE->SetMinimum(0.5 * bot);
+         frE->SetMaximum(3.0 * top);
+         frE->SetStats(0);
+         frE->Draw();
+         keep.push_back(frE);
+         TLegend* lg = new TLegend(0.42, 0.72, 0.92, 0.89);
+         lg->SetBorderSize(0);
+         lg->SetFillStyle(0);
+         for (int c = 0; c < kNC; c++) {
+            hEw[c]->Draw("hist same");
+            lg->AddEntry(hEw[c], kCShort[c], "l");
+         }
+         lg->Draw();
+         nt.SetTextSize(0.045);
+         nt.DrawLatexNDC(0.20, 0.17, "flat = the recipe worked");
+      }
+      cv->Print(pdf);
+
+      // ---- page 2b: the same four, unweighted, for the before picture ----
+      cv->Clear();
+      cv->Divide(4, 1);
+      for (int c = 0; c < kNC; c++) {
+         cv->cd(c + 1);
+         gPad->SetLeftMargin(0.17);
+         gPad->SetLogy();
+         hEu[c]->SetMinimum(0.5);
+         hEu[c]->SetMaximum(3.0 * hEu[c]->GetMaximum());
+         hEu[c]->Draw("hist");
+      }
+      cv->cd(4);
+      gPad->SetLeftMargin(0.17);
+      gPad->SetLogy();
+      {
+         double top = 0;
+         for (int c = 0; c < kNC; c++)
+            if (hEu[c]->GetMaximum() > top) top = hEu[c]->GetMaximum();
+         TH1F* frE2 = new TH1F("frEallU", "all classes, unweighted;cluster energy [GeV];clusters",
+                               nEbin, 0, eTop);
+         frE2->SetMinimum(0.5);
+         frE2->SetMaximum(3.0 * (top > 0 ? top : 1));
+         frE2->SetStats(0);
+         frE2->Draw();
+         keep.push_back(frE2);
+         TLegend* lg = new TLegend(0.42, 0.72, 0.92, 0.89);
+         lg->SetBorderSize(0);
+         lg->SetFillStyle(0);
+         for (int c = 0; c < kNC; c++) {
+            hEu[c]->Draw("hist same");
+            lg->AddEntry(hEu[c], kCShort[c], "l");
+         }
+         lg->Draw();
+         nt.SetTextSize(0.045);
+         nt.DrawLatexNDC(0.20, 0.17, "hadronic is gone above ~40 GeV");
       }
       cv->Print(pdf);
 

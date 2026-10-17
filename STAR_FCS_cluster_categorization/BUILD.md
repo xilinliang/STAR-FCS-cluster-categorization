@@ -1467,13 +1467,19 @@ the test half is never weighted.
 | page | what it shows | what to look for |
 |---|---|---|
 | 1 | the weight itself against cluster energy, one line per class | where it rises above 1 — those are the bins the training is told to believe harder |
-| 2 | cluster energy per class, weighted over unweighted | the weighted curves should be flat; that is the recipe working, and the check that it did |
+| 2 | **ECal cluster energy per class**: one pad each, weighted over unweighted, plus a fourth pad with all three classes weighted on one log axis | the weighted curves should be flat; the fourth pad compares the kinds with each other rather than each with itself |
+| 2b | the same four unweighted, on log axes | the before picture — where each class actually lives, and where the hadronic one stops |
 | 3 | class share in each energy bin, unweighted pane then weighted pane | **the money plot.** If cluster energy carries class information the unweighted pane shows it; the weighted pane should sit near the 1/3 line wherever all three classes exist |
 | 4 | effective clusters over raw clusters per bin | where the weighting spends statistics: 1 means it costs nothing there |
 | 5+ | every input variable, one page per class | whether the weighting reshaped an input, not just the energy |
 
 The printed output adds the weight table and, per class, the raw count beside
 the effective count (Σw)² / Σw² — how much independent evidence survives.
+
+Pages 2 and 2b are the pair to read first for "what does the sample look like
+after weighting": 2b shows each class where it really lives (hadronic gone above
+~40 GeV), 2 shows what the weighting made of that. A weighted curve can only be
+flat across the range its class occupies — flat does not mean the class is there.
 
 Page 3 is the one that answers the question the weighting exists for. Page 4 is
 the one that shows its price. Read them together: a bin where the share is fixed
