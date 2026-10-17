@@ -80,12 +80,27 @@ void unitArea(TH1F* h) {
    const double a = h->Integral();
    if (a > 0) h->Scale(1.0 / a);
 }
-// draw a pair on the current pad with a common vertical range
-void drawPair(TH1F* u, TH1F* w) {
+// Draw a pair on the current pad with a common vertical range. On a log pad
+// the floor has to be positive, and it has to be set on the histogram that
+// draws the axes or ROOT silently draws nothing.
+void drawPair(TH1F* u, TH1F* w, bool logy = false) {
    double top = u->GetMaximum();
    if (w->GetMaximum() > top) top = w->GetMaximum();
-   u->SetMaximum(1.25 * (top > 0 ? top : 1));
-   u->SetMinimum(0);
+   if (top <= 0) top = 1;
+   if (logy) {
+      double bot = 1e30;
+      for (int b = 1; b <= u->GetNbinsX(); b++) {
+         const double a = u->GetBinContent(b), c = w->GetBinContent(b);
+         if (a > 0 && a < bot) bot = a;
+         if (c > 0 && c < bot) bot = c;
+      }
+      if (!(bot < top)) bot = 0.5;
+      u->SetMinimum(0.5 * bot);
+      u->SetMaximum(3.0 * top);
+   } else {
+      u->SetMinimum(0);
+      u->SetMaximum(1.25 * top);
+   }
    u->Draw("hist");
    w->Draw("hist same");
 }
@@ -335,9 +350,10 @@ void qaWeights(const char* infile = "feat_pico_mix1.root", const char* outName =
       for (int c = 0; c < kNC; c++) {
          cv->cd(c + 1);
          gPad->SetLeftMargin(0.17);
+         gPad->SetLogy();
          styleU(hEu[c], kCColor[c]);
          styleW(hEw[c], kCColor[c]);
-         drawPair(hEu[c], hEw[c]);
+         drawPair(hEu[c], hEw[c], true);
          TLegend* lg = new TLegend(0.40, 0.76, 0.92, 0.89);
          lg->SetBorderSize(0);
          lg->SetFillStyle(0);
@@ -426,6 +442,7 @@ void qaWeights(const char* infile = "feat_pico_mix1.root", const char* outName =
       for (int pane = 0; pane < 2; pane++) {
          cv->cd(pane + 1);
          gPad->SetLeftMargin(0.13);
+         gPad->SetLogy(0);
          TH1F* frf = new TH1F(Form("frFrac%d", pane), ttl[pane], W::kNWB, 0, (double)W::kNWB);
          frf->SetMinimum(0);
          frf->SetMaximum(1.15);
@@ -466,6 +483,7 @@ void qaWeights(const char* infile = "feat_pico_mix1.root", const char* outName =
       cv->Clear();
       cv->cd();
       gPad->SetLeftMargin(0.10);
+      gPad->SetLogy(0);  // page 1 left the canvas on a log axis
       TH1F* fre = new TH1F("frEff", "effective clusters / raw clusters, per energy bin;"
                                     "cluster energy bin, lower edge [GeV];N_{eff} / N",
                            W::kNWB, 0, (double)W::kNWB);
@@ -503,6 +521,7 @@ void qaWeights(const char* infile = "feat_pico_mix1.root", const char* outName =
          for (int k = 0; k < nPad; k++) {
             cv->cd(k + 1);
             gPad->SetLeftMargin(0.16);
+            gPad->SetLogy(0);
             unitArea(hVu[c][k]);
             unitArea(hVw[c][k]);
             styleU(hVu[c][k], kCColor[c]);

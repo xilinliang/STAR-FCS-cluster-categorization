@@ -1469,12 +1469,46 @@ the test half is never weighted.
 | 1 | the weight itself against cluster energy, one line per class | where it rises above 1 — those are the bins the training is told to believe harder |
 | 2 | **ECal cluster energy per class**: one pad each, weighted over unweighted, plus a fourth pad with all three classes weighted on one log axis | the weighted curves should be flat; the fourth pad compares the kinds with each other rather than each with itself |
 | 2b | the same four unweighted, on log axes | the before picture — where each class actually lives, and where the hadronic one stops |
-| 3 | class share in each energy bin, unweighted pane then weighted pane | **the money plot.** If cluster energy carries class information the unweighted pane shows it; the weighted pane should sit near the 1/3 line wherever all three classes exist |
+| 3 | class share in each energy bin, unweighted pane then weighted pane | **the money plot** — see below |
 | 4 | effective clusters over raw clusters per bin | where the weighting spends statistics: 1 means it costs nothing there |
 | 5+ | every input variable, one page per class | whether the weighting reshaped an input, not just the energy |
 
 The printed output adds the weight table and, per class, the raw count beside
 the effective count (Σw)² / Σw² — how much independent evidence survives.
+
+#### What "class share per energy bin" means, and what it showed
+
+Take one cluster-energy bin. Of all the training clusters in it, what fraction
+is hadronic, what fraction single EM, what fraction merged π⁰? Three numbers
+that add to 1, plotted bin by bin. The unweighted pane counts clusters; the
+weighted pane sums weights, which is what the training actually sees.
+
+**It is the direct measurement of whether cluster energy carries class
+information.** Flat lines at 1/3 mean energy says nothing about the class;
+lines that separate mean a model can read the class off the energy alone.
+
+Measured on the mixed sample:
+
+| | 0–1 GeV | 10–15 GeV | 25–30 GeV | above 40 GeV |
+|---|---|---|---|---|
+| **unweighted** hadronic | 0.97 | 0.37 | 0.21 | ~0 |
+| **unweighted** single EM | 0.02 | 0.31 | 0.53 | 0.49 |
+| **weighted** hadronic | 0.47 | 0.39 | 0.39 | 0.07 → 0 |
+| **weighted** single EM | 0.32 | 0.32 | 0.32 | 0.49 |
+
+The unweighted pane is the energy prior, drawn: at 1 GeV almost every cluster is
+hadronic, above 40 GeV almost none is, and the curves cross near 10–15 GeV —
+which is exactly where the efficiency-versus-cluster-energy curves cross. The
+weighted pane is flat from 1 to 30 GeV, so the weighting does what it is for,
+and then collapses above 35 GeV because there is nothing there to reweight.
+
+One detail the plot settles: the weighted shares sit at **0.40 / 0.32 / 0.28**,
+not at 1/3. That is the per-class renormalisation. Each class's total weight is
+restored to its own cluster count, and π⁻ spreads that total over 12 populated
+bins against 14 for the others, so its per-bin share is
+40660/12 : 38808/14 : 33368/14 = 0.40 : 0.32 : 0.28 — the measured values
+exactly. The residual tilt is 1.4:1, small enough that it explains nothing we
+have been chasing, which is why the `weightMode=2` idea stays withdrawn.
 
 Pages 2 and 2b are the pair to read first for "what does the sample look like
 after weighting": 2b shows each class where it really lives (hadronic gone above
