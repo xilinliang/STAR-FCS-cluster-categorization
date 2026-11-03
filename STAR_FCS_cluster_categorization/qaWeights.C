@@ -28,8 +28,11 @@
 //     page 3   class composition in each energy bin, unweighted then weighted.
 //              THE plot: if cluster energy carries class information, the
 //              unweighted pad shows it and the weighted pad should not
-//     page 4   effective statistics, (sum w)^2 / sum w^2 over the raw count,
-//              per class per bin: where the weighting spends its evidence
+//     page 4   how many real clusters sit behind each bin's equal slice of
+//              training weight, per class, with the class-level effective
+//              count printed on it. (A PER-BIN effective count is the raw
+//              count by construction - inside one bin every cluster of a
+//              class has the same weight - so the loss is a cross-bin number.)
 //     then     every input variable of the set, one page per class, each pad
 //              weighted over unweighted at unit area
 //   <out>.root  every histogram
@@ -479,36 +482,66 @@ void qaWeights(const char* infile = "feat_pico_mix1.root", const char* outName =
       }
       cv->Print(pdf);
 
-      // ---- page 4: effective statistics per bin ----
+      // ---- page 4: how many real clusters each bin's weight rests on ----
+      //
+      // NOT the per-bin effective statistics. Inside one energy bin every
+      // cluster of a class carries the SAME weight, so (sum w)^2 / sum w^2 is
+      // identically the raw count and the ratio is 1 by construction - the
+      // first version of this page drew three flat lines at 1 and said
+      // nothing. The loss is a CROSS-bin quantity, printed per class above.
+      //
+      // What a bin can say is how much real evidence sits under the equal
+      // slice of training weight it was given. Every populated bin of a class
+      // speaks equally loudly in the fit; this is the count it speaks from.
       cv->Clear();
       cv->cd();
       gPad->SetLeftMargin(0.10);
-      gPad->SetLogy(0);  // page 1 left the canvas on a log axis
-      TH1F* fre = new TH1F("frEff", "effective clusters / raw clusters, per energy bin;"
-                                    "cluster energy bin, lower edge [GeV];N_{eff} / N",
+      gPad->SetLogy();
+      double nTop = 1;
+      for (int c = 0; c < kNC; c++)
+         for (int b = 0; b < W::kNWB; b++)
+            if (wCount[c][b] > nTop) nTop = wCount[c][b];
+      TH1F* fre = new TH1F("frEff", "clusters behind each bin's equal slice of training weight;"
+                                    "cluster energy bin, lower edge [GeV];clusters in the bin",
                            W::kNWB, 0, (double)W::kNWB);
-      fre->SetMinimum(0);
-      fre->SetMaximum(1.3);
+      fre->SetMinimum(0.5);
+      fre->SetMaximum(20.0 * nTop);
       fre->SetStats(0);
       for (int b = 0; b < W::kNWB; b++) fre->GetXaxis()->SetBinLabel(b + 1, Form("%g", W::kEdge[b]));
       fre->Draw();
       keep.push_back(fre);
-      TLegend* lg4 = new TLegend(0.68, 0.72, 0.90, 0.89);
+      TLegend* lg4 = new TLegend(0.70, 0.56, 0.92, 0.74);
       lg4->SetBorderSize(0);
       lg4->SetFillStyle(0);
       for (int c = 0; c < kNC; c++) {
-         TH1F* he = new TH1F(Form("hEff_%s", kCShort[c]), "", W::kNWB, 0, (double)W::kNWB);
-         for (int b = 0; b < W::kNWB; b++) {
-            const double neff = (sumW2[c][b] > 0) ? sumW[c][b] * sumW[c][b] / sumW2[c][b] : 0;
-            he->SetBinContent(b + 1, wCount[c][b] > 0 ? neff / wCount[c][b] : 0);
-         }
+         TH1F* he = new TH1F(Form("hNbin_%s", kCShort[c]), "", W::kNWB, 0, (double)W::kNWB);
+         for (int b = 0; b < W::kNWB; b++) he->SetBinContent(b + 1, wCount[c][b]);
          styleW(he, kCColor[c]);
          he->Draw("hist same");
          lg4->AddEntry(he, kCShort[c], "l");
          keep.push_back(he);
       }
+      TLine* floorLine = new TLine(0, (double)W::kMinBin, (double)W::kNWB, (double)W::kMinBin);
+      floorLine->SetLineStyle(3);
+      floorLine->Draw();
       lg4->Draw();
-      nt.DrawLatexNDC(0.12, 0.84, "1 = the weighting costs nothing in that bin");
+      nt.SetTextSize(0.034);
+      nt.DrawLatexNDC(0.12, 0.88, "every populated bin of a class carries the SAME training weight;");
+      nt.DrawLatexNDC(0.12, 0.835, "this is how many real clusters that weight rests on");
+      nt.DrawLatexNDC(0.12, 0.79, Form("dotted: %d clusters, below which a bin merges into its neighbour",
+                                       W::kMinBin));
+      {
+         double yt = 0.72;
+         for (int c = 0; c < kNC; c++) {
+            double sw = 0, sw2 = 0;
+            for (int b = 0; b < W::kNWB; b++) { sw += sumW[c][b]; sw2 += sumW2[c][b]; }
+            const double neff = (sw2 > 0) ? sw * sw / sw2 : 0;
+            const double raw = hEu[c]->GetEntries();
+            nt.DrawLatexNDC(0.12, yt, Form("%s: %.0f clusters, %.0f effective across bins (%.2f)",
+                                           kCShort[c], raw, neff, raw > 0 ? neff / raw : 0));
+            yt -= 0.045;
+         }
+      }
       cv->Print(pdf);
 
       // ---- the input variables, one page per class ----
