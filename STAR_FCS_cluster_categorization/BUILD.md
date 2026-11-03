@@ -1470,7 +1470,7 @@ the test half is never weighted.
 | 2 | **ECal cluster energy per class**: one pad each, weighted over unweighted, plus a fourth pad with all three classes weighted on one log axis | the weighted curves should be flat; the fourth pad compares the kinds with each other rather than each with itself |
 | 2b | the same four unweighted, on log axes | the before picture — where each class actually lives, and where the hadronic one stops |
 | 3 | class share in each energy bin, unweighted pane then weighted pane | **the money plot** — see below |
-| 4 | effective clusters over raw clusters per bin | where the weighting spends statistics: 1 means it costs nothing there |
+| 4 | clusters behind each bin's equal slice of training weight, log axis | where the weighting extrapolates: a bin near the 50-cluster merge line carries the same say in the fit as one with 10,000 |
 | 5+ | every input variable, one page per class | whether the weighting reshaped an input, not just the energy |
 
 The printed output adds the weight table and, per class, the raw count beside
@@ -1516,9 +1516,16 @@ after weighting": 2b shows each class where it really lives (hadronic gone above
 flat across the range its class occupies — flat does not mean the class is there.
 
 Page 3 is the one that answers the question the weighting exists for. Page 4 is
-the one that shows its price. Read them together: a bin where the share is fixed
-but the effective statistics collapse is a bin where the model is being told to
-be confident about almost nothing.
+the one that shows its price. Read them together: a bin whose share is correctly
+flattened on page 3 but which sits near the merge line on page 4 is a bin where
+the model is being told to be confident about almost nothing.
+
+A note on what page 4 does **not** show. A per-bin effective count, (Σw)²/Σw²
+over the raw count, is 1 by construction: inside one energy bin every cluster of
+a class carries the same weight. The first version of this page drew three flat
+lines at 1 and said nothing. The loss is a cross-bin quantity and is printed per
+class instead; the page shows the raw count behind each bin's equal slice of
+weight, which is the thing that varies.
 
 **One header, two users.** The recipe now lives in
 `StRoot/StFcsMLCategoryMaker/StFcsEnergyWeights.h` — bin edges, the thin-bin
