@@ -950,15 +950,18 @@ the whole training sample:
 So keep a **continuous (flat) sample as the backbone** and add fixed-energy sets
 on top, weighted toward the high end; add 2 and 5 GeV points if the low-energy
 region matters. Keep `weightMode=1` — fixed-energy spikes make the spectrum very
-non-uniform, which is exactly what the flat-in-cluster-energy weights correct.
+non-uniform. That was the original argument for `weightMode=1`; the measurement
+in **The energy prior** below overturned it — the weights buy nothing above
+20 GeV and cost the hadronic class a great deal, so the current recommendation is
+`weightMode=0`. Run both if you add a new energy point: the balance can move.
 
 `runTrainAll.sh` runs the whole chain over any list of files:
 
 ```bash
-./runTrainAll.sh mix1 gamma.e{10,20,30,40,50,60}.vz0.all.picoDst.root \
-                      pi0.e{10,20,30,40,50,60}.vz0.all.picoDst.root \
-                      pi-.e{10,20,30,40,50,60}.vz0.all.picoDst.root \
-                      gamma.e60.vz0.all.picoDst.root pi0.e60.vz0.all.picoDst.root
+./runTrainAll.sh mix2 gamma.e{10,20,30,40,50,60,80}.vz0.all.picoDst.root \
+                      pi0.e{10,20,30,40,50,60,80}.vz0.all.picoDst.root \
+                      pi-.e{10,20,30,40,50,60,80}.vz0.all.picoDst.root \
+                      gamma.e80.vz0.all.picoDst.root pi0.e80.vz0.all.picoDst.root
 ```
 
 It dumps each file (skipping any already dumped), `hadd`s them into
@@ -1562,6 +1565,55 @@ and compare the same dump from a MuDst. If the fraction is small the effect on
 training is negligible, but the variable should still be clamped or the cluster
 rejected rather than fed in at 5x.
 
+## Adding a higher gun energy (the 80 GeV sample)
+
+Most of the chain already follows the sample: `qaFeatures.C`, `qaWeights.C` and
+`evalCategory.C` take the top of every energy axis from the `e<number>` token in
+the file name (`feat_pi0.e80...root` gives 80) or, failing that, from the largest
+energy in the tree. Those need nothing when a new energy point arrives.
+
+Three things are hard-coded and were extended for the 80 GeV sample:
+
+| what | file | before | after |
+|---|---|---|---|
+| weight bin edges | `StRoot/StFcsMLCategoryMaker/StFcsEnergyWeights.h` | last finite edge 60 | 70 and 80 added, `kNWB` 14 → 16 |
+| uniform bins, ePIC-style pages | `evalCategory.C` | 2 GeV ≤36, else 4 | 2 GeV ≤36, 4 GeV ≤64, 5 GeV above |
+| photon-separation bins | `evalCategory.C` | first edge 0.5 towers | 0.25 and 0.75 added, `nSB` 12 → 14 |
+
+**The weight edges are the one that changes what gets trained.** `kEdge` ended at
+60 followed by an open bin to infinity, so every cluster from 60 GeV up — the
+entire new sample — shared a single weight slice. Flat-in-cluster-energy
+weighting would then have been flat everywhere except exactly where the new
+statistics are. Extending the list costs nothing when a point is missing: the
+empty bins are folded into their neighbours by the `kMinBin` merge, so the same
+header is correct for a 1–60 GeV file and an 80 GeV one. Extend it again when a
+higher energy is generated.
+
+The separation bins matter for the merged-π⁰ class. The minimum opening of a π⁰
+is about `34.7/E` towers — 0.58 at 60 GeV, 0.50 at 70, 0.43 at 80 — so with a
+first edge at 0.5 the whole new high-energy end collapsed into one bin and its
+efficiency could not be read off the page.
+
+Nothing else needs touching: `trainTMVA.C` takes its binning from the shared
+header, the fine energy axis in `evalCategory.C` grows geometrically to whatever
+`eTop` is, and the per-energy-band table finds its bands from the gaps in the
+generated energy (8 points up to 80 GeV is well inside `kMaxBands = 16`).
+
+What to check on the first 80 GeV run, in order:
+
+1. `qaFeatures.C` — the per-gun generated-energy page should show the new spike
+   at 80, and the cluster-energy page should show where the π⁰ response actually
+   lands (at 60 GeV it piled up at the gun energy; expect the same at 80).
+2. The weight table printed by `trainTMVA.C` — confirm the 60–70 and 70–80 bins
+   are populated for all three classes and were not merged away. If the hadronic
+   class is empty there, the energy prior described above simply moved up: the
+   model will have no hadronic truth to learn from at 80 GeV either, and the
+   honest quote stays bounded by where π⁻ clusters actually exist.
+3. `evalCategory.C` with `energyAxis=0` — the hadronic efficiency-vs-cluster-
+   energy curve. The open question is whether it still falls off a cliff above
+   ~30 GeV. Adding 80 GeV γ and π⁰ without 80 GeV π⁻ would make that worse, not
+   better, because it adds high-energy EM clusters and no hadronic counterpart.
+
 ## When it goes wrong
 
 Every one of these actually happened while building this; the cause is rarely
@@ -1609,6 +1661,22 @@ Everything else that touches STAR classes — the chain macros, the g2t field
 access, the behaviour of `StFcsDbMaker` with `setDbAccess(0)` in a pico chain —
 is written from the `star-sw` sources and is only proven by your `cons` build and
 first run.
+
+All eight analysis macros — `trainTMVA.C`, `evalCategory.C`, `compareModels.C`,
+`qaFeatures.C`, `qaWeights.C`, `plotDataResult.C`, `testFeatures.C`,
+`testAssoc.C` — now type-check against a set of minimal ROOT stub headers
+(`TEfficiency`, `TMVA::Factory`, `TMVA::Reader`, `TPad`, `TCut` and the rest)
+before anything is committed. That catches a mistyped member or a wrong array
+length without a round trip to RCF; it does not catch anything about what ROOT
+actually does at run time. The four `run*_ml.C` chain macros are excluded — they
+carry no `#include` at all and rely on CINT's implicit headers inside the STAR
+environment.
+
+One real portability fix came out of adding those stubs: the output-name line in
+`evalCategory.C` was `strlen(outName) ? TString(outName) : Form(...)`, which a
+compiler rejects as ambiguous (each operand converts to the other) even though
+CINT accepts it. It is now `TString(Form(...))` on the second branch, so the
+macro would also survive `.L evalCategory.C+`.
 
 ### What "validated" does and does not mean here
 

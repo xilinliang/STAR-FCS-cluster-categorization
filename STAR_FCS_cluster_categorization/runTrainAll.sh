@@ -6,15 +6,15 @@
 #
 # example, fixed-energy samples plus the flat one you already have:
 #   ./runTrainAll.sh e2fix \
-#       gamma.e{10,20,30,40,50,60}.vz0.all.picoDst.root \
-#       pi0.e{10,20,30,40,50,60}.vz0.all.picoDst.root \
-#       pi-.e{10,20,30,40,50,60}.vz0.all.picoDst.root \
-#       gamma.e60.vz0.all.picoDst.root pi0.e60.vz0.all.picoDst.root pi-.e60.vz0.all.picoDst.root
+#       gamma.e{10,20,30,40,50,60,80}.vz0.all.picoDst.root \
+#       pi0.e{10,20,30,40,50,60,80}.vz0.all.picoDst.root \
+#       pi-.e{10,20,30,40,50,60,80}.vz0.all.picoDst.root \
+#       gamma.e80.vz0.all.picoDst.root pi0.e80.vz0.all.picoDst.root pi-.e80.vz0.all.picoDst.root
 #
 # WHY THE FLAT SAMPLE STAYS IN THE LIST. Set 13 uses logE, and a tree cannot
-# interpolate: trained only at 10, 20, ... 60 GeV it may learn energy-specific
+# interpolate: trained only at 10, 20, ... 80 GeV it may learn energy-specific
 # rules and behave oddly at 15 or 25 GeV, which is what data contains. Fixed
-# energies are for STATISTICS where you need them - 40 to 60 GeV, where merged
+# energies are for STATISTICS where you need them - 40 GeV and up, where merged
 # pi0 lives - and for clean evaluation points; the continuum is what keeps the
 # model smooth. Mixing both is the intended use.
 #

@@ -250,7 +250,8 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    // portrait, which leaves a wide canvas squeezed into one corner of the page.
    gStyle->SetPaperSize(28.0, 12.7);
 
-   const TString out = strlen(outName) ? TString(outName) : Form("evalFcsCat%d_%s", featureSet, method);
+   const TString out =
+       strlen(outName) ? TString(outName) : TString(Form("evalFcsCat%d_%s", featureSet, method));
    const char* sampleName[3] = {"TRAINING half", "TEST half (held out)", "ALL clusters"};
    if (sample < 0 || sample > 2) sample = 1;
 
@@ -369,8 +370,14 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    }
    const int nEB = (int)eBinV.size() - 1;
    const double* eBins = &eBinV[0];
-   const int nSB = 12;
-   const double sBins[nSB + 1] = {0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 11.0};
+   // Photon separation. The minimum opening of a pi0 is about 34.7/E towers:
+   // 0.58 at 60 GeV, 0.50 at 70, 0.43 at 80 - so with a first edge of 0.5 the
+   // whole high-energy end piles into one bin and the merged-pi0 efficiency
+   // there cannot be read. The two extra edges below one tower keep it
+   // resolved.
+   const int nSB = 14;
+   const double sBins[nSB + 1] = {0,   0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5,
+                                  3.0, 3.5,  4.0, 5.0,  6.0, 8.0, 11.0};
 
    TEfficiency *effE_ml[3], *purE_ml[3], *effE_st[3], *purE_st[3];
    for (int k = 0; k < 3; k++) {
@@ -385,9 +392,9 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    }
    // ePIC-style: uniform bins in the energy chosen by energyAxis
    const char* eAxisTitle = (energyAxis == 1) ? "generated energy [GeV]" : "cluster energy [GeV]";
-   // uniform bins for the ePIC-style pages: 2 GeV up to 32 GeV, wider above so
-   // a 60 GeV sample does not end up with 30 sparse bins
-   const double uStep = (eTop <= 36) ? 2.0 : 4.0;
+   // uniform bins for the ePIC-style pages: 2 GeV up to 36 GeV, wider above so
+   // a 60 or 80 GeV sample does not end up with 30 or 40 sparse bins
+   const double uStep = (eTop <= 36) ? 2.0 : (eTop <= 64) ? 4.0 : 5.0;
    const int nUB = (int)ceil(eTop / uStep);
    std::vector<double> uBinV(nUB + 1);
    for (int b = 0; b <= nUB; b++) uBinV[b] = uStep * b;

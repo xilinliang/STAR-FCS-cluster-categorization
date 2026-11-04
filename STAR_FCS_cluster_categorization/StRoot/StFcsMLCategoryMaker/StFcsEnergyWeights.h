@@ -35,9 +35,16 @@
 namespace StFcsEnergyWeights {
 
 const int kNCls = 3;
-const int kNWB = 14;  // cluster-energy bins
-const double kEdge[kNWB + 1] = {0.0, 1, 2, 3, 5,  7,  10, 15,
-                                20,  25, 30, 40, 50, 60, 1e9};
+const int kNWB = 16;  // cluster-energy bins
+// The upper edges follow the fixed-energy gun points of the sample, now up to
+// 80 GeV. An edge the sample does not reach costs nothing: the bin comes back
+// empty and the kMinBin merge below folds it into its neighbour. So this list
+// may run ahead of the data, and SHOULD be extended whenever a higher gun
+// energy is generated - otherwise every cluster above the last finite edge
+// shares one open-ended bin and the weighting stops being flat exactly where
+// the new statistics are.
+const double kEdge[kNWB + 1] = {0.0, 1,  2,  3,  5,  7,  10, 15, 20,
+                                25,  30, 40, 50, 60, 70, 80, 1e9};
 const int kMinBin = 50;     // fewer clusters of a class than this: merge up
 const double kWCap = 10.0;  // cap a weight at this times the class median
 
