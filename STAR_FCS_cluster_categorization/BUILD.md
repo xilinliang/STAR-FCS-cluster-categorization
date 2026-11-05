@@ -989,10 +989,28 @@ in **The energy prior** below overturned it — the weights buy nothing above
 ```
 
 It dumps each file (skipping any already dumped), `hadd`s them into
-`feat_pico_<tag>.root`, runs the QA, trains with `labelDef=1 weightMode=1`, evaluates
-BDTG and MLP on both halves, and writes the BDTG-vs-MLP and train-vs-test
-comparisons. `env FEATURESET=10 ./runTrainAll.sh ...` switches the feature set
-(`env`, because tcsh does not take `VAR=value command`).
+`feat_pico_<tag>.root`, runs the QA, trains with `labelDef=1`, evaluates BDTG and
+MLP on both halves, and writes the BDTG-vs-MLP and train-vs-test comparisons.
+Four environment variables override its defaults — `FEATURESET` (13), `EMIN`
+(0.5), `WEIGHTMODE` (0) and `NORMMODE` (0):
+
+```csh
+env FEATURESET=3 WEIGHTMODE=1 ./runTrainAll.sh mix2 ...
+```
+
+(`env`, because tcsh does not take `VAR=value command`.)
+
+**`WEIGHTMODE` now defaults to 0.** It was hard-coded to 1 until the 80 GeV run,
+which is how the weighted model kept being the one evaluated long after the
+measurement in **The energy prior** said not to use it. A non-default mode adds a
+run tag — `_w1`, `_eq` — to every output name, so two modes on one sample no
+longer overwrite each other's pdfs and logs; the weight files were already
+distinguished by `trainTMVA.C`'s job name (`FcsCat13gen` vs `FcsCat13genw`).
+
+Both the per-file dumps and the merged tree are kept, so re-running the script on
+a sample it has already merged goes straight to the QA: a second pass with a
+different `WEIGHTMODE` costs only the training and the evaluations, not another
+`hadd`.
 
 `evalCategory.C` prints an extra table for such a sample: efficiency and purity
 per class **per energy band**, with the FCS Cluster category on the line beneath.
