@@ -1730,6 +1730,54 @@ efficiency peaks at 0.45 near 35–40 GeV then decays to ~0.05 by 70 GeV. Above
 model is the only thing producing a decision up there — with the purity caveat
 above attached to it.
 
+### The 80 GeV sample, unweighted — the numbers to quote
+
+Same file, same set 13, `weightMode=0` (`FcsCat13gen`), test half, `truthDef=1`.
+The sample is a **continuous 1–80 GeV spectrum**, not fixed energy points — the
+macro finds one band with no gap wider than 1.5 GeV.
+
+| class (gun particle) | BDTG eff | BDTG purity | BDTG pur(bal) | MLP eff | MLP purity | MLP pur(bal) | FCS Cluster eff | FCS Cluster purity |
+|---|---|---|---|---|---|---|---|---|
+| other — hadronic (π⁻) | 0.948 ± 0.002 | 0.877 ± 0.002 | 0.858 | 0.919 ± 0.002 | 0.910 ± 0.002 | 0.896 | — (no hadron class) | — |
+| onePhoton — Single EM (γ) | 0.851 ± 0.003 | 0.876 ± 0.002 | 0.862 | 0.870 ± 0.002 | 0.870 ± 0.002 | 0.858 | 0.411 ± 0.004 | 0.261 ± 0.003 |
+| twoPhoton — merged π⁰ | 0.802 ± 0.003 | 0.862 ± 0.003 | 0.884 | 0.836 ± 0.003 | 0.846 ± 0.003 | 0.870 | 0.158 ± 0.003 | 0.748 ± 0.008 |
+
+Against the reference: Single EM efficiency 2.1× the FCS Cluster category at 3.3×
+its purity, merged π⁰ efficiency 5.3× at comparable purity. STAR's one-photon
+purity of 0.26 is the direct consequence of its having no hadron class — it calls
+83 % of hadronic clusters "one photon".
+
+**MLP now edges BDTG on every class**, which reverses the earlier
+recommendation. BDTG keeps the hadronic efficiency (0.948 vs 0.919) but MLP takes
+the hadronic purity by more (0.910 vs 0.877) and wins both EM classes outright.
+On efficiency × purity MLP leads by 0.005 / 0.011 / 0.016 (0.010 / 0.013 / 0.018
+using the balanced purity) — small, consistent, and in the same direction for all
+three. Note the earlier BDTG preference was formed largely on WEIGHTED
+comparisons, where the MLP suffered far more from the weighting than the BDTG did
+(23 points of hadronic efficiency against 4.6). Unweighted, that handicap is
+gone. **Check `ovCheck_80GeV_MLP.log` before adopting it** — the MLP is the more
+overtraining-prone of the two, and a train-half/test-half gap would undo this.
+
+### Correction: the high-energy hadronic cliff is not a sampling problem
+
+Earlier entries, including the one above, called for π⁻ guns at the top of the
+range as the highest-value thing to generate. **That was wrong for this sample.**
+The generated-energy page of the weighted run shows hadronic efficiency flat at
+0.85–0.88 all the way to 78 GeV with small errors, so π⁻ are already generated
+across the whole range in useful numbers. What is missing is not high-energy π⁻
+*events* but high-energy hadronic *clusters*: a π⁻ spreads its energy over
+several ECal clusters of a few GeV, so it rarely makes a single cluster above
+~40 GeV no matter how hard the gun is fired.
+
+That reframes the energy prior. A 60 GeV ECal cluster really is very unlikely to
+be hadronic, so a model that leans EM up there is partly *right*, not merely
+biased — and forcing equal class priors per energy bin, as `weightMode=1` does,
+destroys purity in exchange for an efficiency that was never physical. The
+caveat that remains is the honest one: the prior is the prior of **this sample's
+species mix**, and real data with a different hadron-to-photon ratio would shift
+it. That is a reason to quote the balanced purity and to state the mix, not a
+reason to weight.
+
 ## When it goes wrong
 
 Every one of these actually happened while building this; the cause is rarely
