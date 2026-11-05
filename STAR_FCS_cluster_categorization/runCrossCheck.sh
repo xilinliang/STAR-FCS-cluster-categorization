@@ -122,7 +122,7 @@ for wp in "$nA:$wA" "$nB:$wB"; do
          out="x_${wn}W_${dn}D${rt}${sfx2}"
          echo "== $meth trained on $wn, evaluated on $dn ($([ $half = 1 ] && echo test || echo training) half)"
          root4star -b -q \
-            "evalCategory.C+(\"$d\",\"$w\",$fset,\"$meth\",$half,\"$out\",$emin,0.8,\"clusters\",1,1)" \
+            "evalCategory.C+(\"$d\",\"$w\",$fset,\"$meth\",$half,\"$out\",$emin,0.8,\"clusters\",1,2)" \
             2>&1 | tee "${out}.log"
       done
    done

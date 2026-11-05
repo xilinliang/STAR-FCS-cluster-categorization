@@ -95,10 +95,10 @@ for m in BDTG MLP; do
       continue
    fi
    echo "== evaluating $m (test half)"
-   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",1,\"eval${tag}_${m}\",$emin,0.8,\"clusters\",1,1)" \
+   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",1,\"eval${tag}_${m}\",$emin,0.8,\"clusters\",1,2)" \
       2>&1 | tee "eval${tag}_${m}.log"
    echo "== evaluating $m (training half, for the overtraining gap)"
-   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",0,\"ov${tag}_${m}\",$emin,0.8,\"clusters\",1,1)" \
+   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",0,\"ov${tag}_${m}\",$emin,0.8,\"clusters\",1,2)" \
       2>&1 | tee "ov${tag}_${m}.log"
 done
 

@@ -432,19 +432,21 @@ purity only together with the mix — which the macro prints — or use the bala
 one.
 
 `evalFcsCat<set>_<method>.pdf` pages: the confusion matrices; the **ePIC-style
-figure** (below) for the model and for the FCS Cluster category; efficiency
-and purity against cluster energy (model filled, STAR open markers); two-photon
+figure** (below) for the model and for the FCS Cluster category, **on both energy
+axes — cluster energy first, then generated energy**; efficiency
+and purity against cluster energy with all three classes on one pair of panes
+(model filled, STAR open markers); two-photon
 efficiency against the separation of the two photons in towers — the merged-π⁰
 transition, and the plot that shows most directly what the model adds; and the
 model's three score distributions for each true class. Every histogram behind them
 is in the matching `.root` file.
 
-**The ePIC-style figure (pages 2 and 3).** Three panels — *Single EM*,
-*Hadronic*, *Merged π⁰* — each with efficiency (red) and purity (blue) against
-energy, the layout of the ePIC cluster-categorization study; page 2 is the model,
-page 3 the FCS Cluster category (whose Hadronic panel is empty: it has no hadron
-class). Single EM = class onePhoton, Hadronic = other, Merged π⁰ = twoPhoton. Two
-extra arguments, after `treename`, set what "true" means and what the x axis is:
+**The ePIC-style figure.** Three panels — *Single EM*, *Hadronic*, *Merged π⁰* —
+each with efficiency (red) and purity (blue) against energy, the layout of the
+ePIC cluster-categorization study; one page for the model, the next for the FCS
+Cluster category (whose Hadronic panel is empty: it has no hadron class). Single
+EM = class onePhoton, Hadronic = other, Merged π⁰ = twoPhoton. Two extra
+arguments, after `treename`, set what "true" means and what the x axis is:
 
 | `truthDef` | a cluster is truly Single EM / Hadronic / Merged π⁰ when … |
 |---|---|
@@ -452,17 +454,39 @@ extra arguments, after `treename`, set what "true" means and what the x axis is:
 | `1` | γ-gun cluster holding the photon / any π⁻ cluster / π⁰-gun cluster holding both photons; gun fragments and resolved π⁰ photons are dropped |
 | `2` | it comes from a γ / π⁻ / π⁰ event, whatever it contains — pure sample identity, as in a single-particle study; resolved π⁰s then count against Merged π⁰ |
 
-`energyAxis = 1` plots against the generated (gun) energy instead of the cluster
-energy. Both need `genPid`/`genE`. The closest match to the ePIC figure:
+`energyAxis` chooses the x axis of that figure:
+
+| `energyAxis` | pages drawn |
+|---|---|
+| `0` | **cluster energy** only — the energy of the cluster being categorized, the quantity the model is given and the only one a data analysis can bin in |
+| `1` | **generated energy** only — the gun particle's energy; needs `genE` |
+| `2` (default) | **both**, cluster-energy pages first, so one run gives four pages |
+
+Both sets are always *filled* when `genE` is there, so the `.root` file carries
+both whatever the pdf was asked to draw, and `runTrainAll.sh` / `runCrossCheck.sh`
+now ask for both.
+
+**Read the cluster-energy pages, not the generated-energy ones, for a working
+point.** The two agree for γ and for a merged π⁰, where one particle makes one
+cluster of nearly its full energy. They do not agree for π⁻: one 60 GeV hadron
+leaves several clusters of a few GeV each, and on the generated-energy axis all
+of them are entered at 60 GeV. That axis therefore reports the hadronic
+efficiency *of 60 GeV hadrons*, which looks flat and healthy, while the
+cluster-energy axis reports it *per cluster the model actually sees* — and that
+is where the fall-off above ~30 GeV documented in **The energy prior** shows up.
+Measuring the energy weighting on the generated-energy axis is what hid the
+problem for a whole round of this study.
 
 ```csh
-root4star -b -q 'evalCategory.C+("feat_pico_all.root","weights/FcsCat13_BDTG.weights.xml",13,"BDTG",1,"",0.5,0.8,"clusters",1,1)'
+# both axes (the default)
+root4star -b -q 'evalCategory.C+("feat_pico_all.root","weights/FcsCat13_BDTG.weights.xml",13,"BDTG",1,"",0.5,0.8,"clusters",1,2)'
 ```
 
 `truthDef` applies to every page, confusion matrices included. The energy axes
 follow the sample, as in `qaFeatures.C`: the `e60` in `feat_pi0.e60...root` gives
 0–60 GeV, otherwise the largest energy in the file, rounded up; a last argument
-`eAxisMax` overrides it. Bins are 2 GeV wide up to 32 GeV and 4 GeV above. Only
+`eAxisMax` overrides it. Bins on the ePIC-style pages are 2 GeV wide up to
+36 GeV, 4 GeV up to 64 and 5 GeV above. Only
 the axes change — the confusion matrices and the printed numbers always use every
 cluster.
 
@@ -1609,10 +1633,11 @@ What to check on the first 80 GeV run, in order:
    class is empty there, the energy prior described above simply moved up: the
    model will have no hadronic truth to learn from at 80 GeV either, and the
    honest quote stays bounded by where π⁻ clusters actually exist.
-3. `evalCategory.C` with `energyAxis=0` — the hadronic efficiency-vs-cluster-
-   energy curve. The open question is whether it still falls off a cliff above
-   ~30 GeV. Adding 80 GeV γ and π⁰ without 80 GeV π⁻ would make that worse, not
-   better, because it adds high-energy EM clusters and no hadronic counterpart.
+3. The **cluster-energy** pages of the eval pdf (now written by default, ahead
+   of the generated-energy ones) — the hadronic efficiency-vs-cluster-energy
+   curve. The open question is whether it still falls off a cliff above ~30 GeV.
+   Adding 80 GeV γ and π⁰ without 80 GeV π⁻ would make that worse, not better,
+   because it adds high-energy EM clusters and no hadronic counterpart.
 
 ## When it goes wrong
 

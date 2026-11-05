@@ -11,7 +11,10 @@
 //             binomial errors, for the model and for STAR's catStar; and, for a
 //             FIXED-ENERGY sample (a handful of distinct gun energies rather
 //             than a spectrum), one row per energy point
-//   <out>.pdf  : confusion matrices; efficiency and purity vs cluster energy;
+//   <out>.pdf  : confusion matrices; the ePIC-style three-panel efficiency and
+//                purity figure, per energy axis (cluster E, generated E, or
+//                both - see energyAxis); efficiency and purity vs cluster
+//                energy with all three classes on one pair of panes;
 //                two-photon efficiency vs photon separation; the model's score
 //                distributions per true class; and, if the feature file has the
 //                genPid branch, the PER-PARTICLE view: what the clusters of the
@@ -20,10 +23,11 @@
 //                separately for each particle
 //   <out>.root : every histogram and TEfficiency behind the pages
 //
-// THE ePIC-STYLE PAGES (pages 2 and 3). Three panels, "Single EM", "Hadronic",
-// "Merged pi0", each with efficiency (red) and purity (blue) against energy -
-// the same figure as the ePIC calorimeter cluster-categorization study, once
-// for the model and once for the FCS Cluster category. The class behind each
+// THE ePIC-STYLE PAGES. Three panels, "Single EM", "Hadronic", "Merged pi0",
+// each with efficiency (red) and purity (blue) against energy - the same figure
+// as the ePIC calorimeter cluster-categorization study, once for the model and
+// once for the FCS Cluster category, and once per energy axis (see energyAxis
+// below), so the full set is up to four pages. The class behind each
 // panel: Single EM = onePhoton (1), Hadronic = other (0), Merged pi0 =
 // twoPhoton (2). Which clusters count as TRUE Single EM / Hadronic / Merged
 // pi0 is set by truthDef:
@@ -35,15 +39,26 @@
 //      of a pi- event Hadronic, of a pi0 event Merged pi0 - exactly "which
 //      sample did it come from". A resolved pi0 then counts as a Merged-pi0
 //      INefficiency, so expect that panel to fall at low energy.
-// truthDef 1 and 2 need the genPid branch. The x axis is the cluster energy,
-// or with energyAxis = 1 the generated (gun) energy, which is what a
-// single-particle study usually plots:
+// truthDef 1 and 2 need the genPid branch.
+//
+// WHICH ENERGY ON THE X AXIS - energyAxis:
+//   0  CLUSTER energy only. The energy of the cluster being categorized: the
+//      quantity the model is actually given, and the only one a data analysis
+//      can bin in. This is the honest axis for quoting a working point.
+//   1  GENERATED energy only - the energy of the gun particle (needs genE).
+//      What a single-particle simulation study usually plots, but for a pi- it
+//      is not the energy of any one cluster: one 60 GeV hadron leaves several
+//      clusters of a few GeV, all of them entered at 60 on this axis.
+//   2  (default) BOTH, cluster-energy pages first. Same numbers, two views;
+//      where they disagree, the cluster-energy page is the one to trust.
+// Both sets are always FILLED when genE is there, so <out>.root carries both
+// whatever the pdf was asked to draw. Example, generated-energy pages only:
 //   root4star -b -q 'evalCategory.C+("feat_pico_all.root","weights/FcsCat13_BDTG.weights.xml",13,"BDTG",1,"",0.5,0.8,"clusters",1,1)'
 // truthDef changes the truth used on EVERY page, confusion matrices included.
 // Use truthDef = 1 with a model trained with trainTMVA.C labelDef = 1: then
 // the evaluation truth is exactly the training label.
 //
-// THE ePIC-STYLE SCORE PAGE (page 6, needs genPid). P(Single EM), P(Hadronic)
+// THE ePIC-STYLE SCORE PAGE (the last page, needs genPid). P(Single EM), P(Hadronic)
 // and P(Merged pi0) - the model's three scores - each drawn for four input
 // categories (StFcsTrainTestSplit::inputCategory): gamma input, pi0 2-cluster
 // input (one photon of a resolved pi0), pi0 1-cluster input (both photons in
@@ -239,7 +254,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
                   float purityCut = 0.8,
                   const char* treename = "clusters",
                   int truthDef = 0,     // 0 mcLabel, 1 gun particle cleaned, 2 gun particle raw - see header
-                  int energyAxis = 0,   // 0 cluster E, 1 generated (gun) E - ePIC-style pages
+                  int energyAxis = 2,   // ePIC-style pages: 0 cluster E, 1 generated E, 2 both
                   float eAxisMax = 0) { // upper end of the energy axes; 0 = automatic
    using namespace StFcsClusterFeatures;
    gSystem->Load("libTMVA");
@@ -321,8 +336,10 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       printf("truthDef=%d needs the genPid branch, which %s does not have - using mcLabel\n", truthDef, infile);
       truthDef = 0;
    }
-   if (energyAxis == 1 && !haveGen) {
-      printf("energyAxis=1 needs the genE branch, which %s does not have - using cluster E\n", infile);
+   if (energyAxis < 0 || energyAxis > 2) energyAxis = 2;
+   if (energyAxis != 0 && !haveGen) {
+      printf("the generated-energy pages need the genE branch, which %s does not\n"
+             "have - drawing the cluster-energy pages only\n", infile);
       energyAxis = 0;
    }
    // ------------------------------------------------------- energy axis
@@ -390,8 +407,21 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       purE_st[k] = makeEff(Form("purE_star_%s", kClsName[k]),
                            Form("%s purity, %s;cluster E [GeV];purity", kRefName, kClsName[k]), nEB, eBins);
    }
-   // ePIC-style: uniform bins in the energy chosen by energyAxis
-   const char* eAxisTitle = (energyAxis == 1) ? "generated energy [GeV]" : "cluster energy [GeV]";
+   // ePIC-style pages: the same three panels, on one or both energy axes.
+   //   ax 0  CLUSTER energy - what the model is given, and the only axis a
+   //         data analysis can bin in
+   //   ax 1  GENERATED energy of the gun particle - a simulation-only axis
+   // Both are always filled when genE is there; energyAxis only chooses which
+   // ones are DRAWN, so the .root file carries both either way. The two differ
+   // most for the hadronic class, where one gun particle makes several
+   // clusters: all of them sit at the gun energy on ax 1 and at their own, much
+   // smaller energies on ax 0.
+   const int kNAx = 2;
+   const char* eAxisTitle[kNAx] = {"cluster energy [GeV]", "generated energy [GeV]"};
+   const char* axTag[kNAx] = {"clu", "gen"};
+   const char* axShort[kNAx] = {"vs cluster energy", "vs generated energy"};
+   const bool axOn[kNAx] = {energyAxis != 1, energyAxis != 0 && haveGen};
+   const bool axFill[kNAx] = {true, haveGen};
    // uniform bins for the ePIC-style pages: 2 GeV up to 36 GeV, wider above so
    // a 60 or 80 GeV sample does not end up with 30 or 40 sparse bins
    const double uStep = (eTop <= 36) ? 2.0 : (eTop <= 64) ? 4.0 : 5.0;
@@ -399,12 +429,23 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    std::vector<double> uBinV(nUB + 1);
    for (int b = 0; b <= nUB; b++) uBinV[b] = uStep * b;
    const double* uBins = &uBinV[0];
-   TEfficiency *effU_ml[3], *purU_ml[3], *effU_st[3], *purU_st[3];
-   for (int k = 0; k < 3; k++) {
-      effU_ml[k] = makeEff(Form("effU_ml_%s", kClsName[k]), Form("model efficiency, %s;%s;efficiency", kClsName[k], eAxisTitle), nUB, uBins);
-      purU_ml[k] = makeEff(Form("purU_ml_%s", kClsName[k]), Form("model purity, %s;%s;purity", kClsName[k], eAxisTitle), nUB, uBins);
-      effU_st[k] = makeEff(Form("effU_star_%s", kClsName[k]), Form("%s efficiency, %s;%s;efficiency", kRefName, kClsName[k], eAxisTitle), nUB, uBins);
-      purU_st[k] = makeEff(Form("purU_star_%s", kClsName[k]), Form("%s purity, %s;%s;purity", kRefName, kClsName[k], eAxisTitle), nUB, uBins);
+   TEfficiency *effU_ml[kNAx][3], *purU_ml[kNAx][3], *effU_st[kNAx][3], *purU_st[kNAx][3];
+   for (int ax = 0; ax < kNAx; ax++) {
+      if (!axFill[ax]) {
+         for (int k = 0; k < 3; k++)
+            effU_ml[ax][k] = purU_ml[ax][k] = effU_st[ax][k] = purU_st[ax][k] = 0;
+         continue;
+      }
+      for (int k = 0; k < 3; k++) {
+         effU_ml[ax][k] = makeEff(Form("effU_%s_ml_%s", axTag[ax], kClsName[k]),
+                                  Form("model efficiency, %s;%s;efficiency", kClsName[k], eAxisTitle[ax]), nUB, uBins);
+         purU_ml[ax][k] = makeEff(Form("purU_%s_ml_%s", axTag[ax], kClsName[k]),
+                                  Form("model purity, %s;%s;purity", kClsName[k], eAxisTitle[ax]), nUB, uBins);
+         effU_st[ax][k] = makeEff(Form("effU_%s_star_%s", axTag[ax], kClsName[k]),
+                                  Form("%s efficiency, %s;%s;efficiency", kRefName, kClsName[k], eAxisTitle[ax]), nUB, uBins);
+         purU_st[ax][k] = makeEff(Form("purU_%s_star_%s", axTag[ax], kClsName[k]),
+                                  Form("%s purity, %s;%s;purity", kRefName, kClsName[k], eAxisTitle[ax]), nUB, uBins);
+      }
    }
    TEfficiency* effSep_ml = makeEff("effSep_ml", "two-photon efficiency vs separation, model;"
                                     "photon separation [towers];efficiency", nSB, sBins);
@@ -550,13 +591,16 @@ void evalCategory(const char* infile = "feat_pico_all.root",
          if (truth == k) effE_st[k]->Fill(star == k, e);
          if (star == k) purE_st[k]->Fill(truth == k, e);
       }
-      const float ex = (energyAxis == 1) ? genE : e;
-      for (int k = 0; k < 3; k++) {
-         if (truth == k) effU_ml[k]->Fill(pred == k, ex);
-         if (pred == k) purU_ml[k]->Fill(truth == k, ex);
-         if (k == 0) continue;
-         if (truth == k) effU_st[k]->Fill(star == k, ex);
-         if (star == k) purU_st[k]->Fill(truth == k, ex);
+      for (int ax = 0; ax < kNAx; ax++) {
+         if (!axFill[ax]) continue;
+         const float ex = (ax == 1) ? genE : e;
+         for (int k = 0; k < 3; k++) {
+            if (truth == k) effU_ml[ax][k]->Fill(pred == k, ex);
+            if (pred == k) purU_ml[ax][k]->Fill(truth == k, ex);
+            if (k == 0) continue;
+            if (truth == k) effU_st[ax][k]->Fill(star == k, ex);
+            if (star == k) purU_st[ax][k]->Fill(truth == k, ex);
+         }
       }
       if (haveSep && truth == 2 && mcSepCell >= 0) {
          effSep_ml->Fill(pred == 2, mcSepCell);
@@ -786,70 +830,78 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    }
    cv->Print(pdf + "(");
 
-   // pages 2-3: the ePIC-style figure, for the model and for FCS Cluster
+   // the ePIC-style figure: for the model and for FCS Cluster, on each energy
+   // axis that energyAxis asked for - so two pages with energyAxis 0 or 1, and
+   // four with energyAxis 2 (cluster energy first, generated energy after).
    {
       const int panelCls[3] = {1, 0, 2};  // ePIC order: Single EM, Hadronic, Merged pi0
       const char* panelName[3] = {"Single EM", "Hadronic", "Merged #pi^{0}"};
       const TString who[2] = {TString::Format("%s (set %d)", method, featureSet), TString(kRefName)};
-      TEfficiency** effP[2] = {effU_ml, effU_st};
-      TEfficiency** purP[2] = {purU_ml, purU_st};
       TLatex tx;
       tx.SetNDC();
-      for (int m = 0; m < 2; m++) {
-         cv->Clear();
-         cv->cd();
-         tx.SetTextAlign(22);
-         tx.SetTextFont(62);
-         tx.SetTextSize(0.050);
-         tx.DrawLatexNDC(0.5, 0.955, Form("Efficiency and Purity (STAR FCS simulation): %s", who[m].Data()));
-         tx.SetTextFont(42);
-         tx.SetTextSize(0.030);
-         tx.DrawLatexNDC(0.5, 0.905, Form("truth: %s;  %s", truthTxt[truthDef], sampleName[sample]));
-         TPad* body = new TPad(Form("body_%d", m), "", 0.0, 0.0, 1.0, 0.88);
-         body->SetFillStyle(0);
-         body->Draw();
-         body->Divide(3, 1);
-         for (int j = 0; j < 3; j++) {
-            const int k = panelCls[j];
-            body->cd(j + 1);
-            // title and legend sit in a band above the frame, never on the points
-            gPad->SetTopMargin(0.21);
-            gPad->SetLeftMargin(0.15);
-            gPad->SetRightMargin(0.04);
-            gPad->SetBottomMargin(0.13);
-            gPad->SetGridx();
-            gPad->SetGridy();
-            TH1F* fr = gPad->DrawFrame(uBins[0], 0, uBins[nUB], 1.1, Form(";%s;Efficiency / Purity", eAxisTitle));
-            (void)fr;
-            tx.SetTextAlign(12);
+      for (int ax = 0; ax < kNAx; ax++) {
+         if (!axOn[ax]) continue;
+         TEfficiency** effP[2] = {effU_ml[ax], effU_st[ax]};
+         TEfficiency** purP[2] = {purU_ml[ax], purU_st[ax]};
+         for (int m = 0; m < 2; m++) {
+            cv->Clear();
+            cv->cd();
+            tx.SetTextAlign(22);
             tx.SetTextFont(62);
-            tx.SetTextSize(0.055);
-            tx.DrawLatexNDC(0.15, 0.945, Form("%s: %s", m == 0 ? method : kRefName, panelName[j]));
-            if (m == 1 && k == 0) {
-               // FCS Cluster has no hadron class: nothing to draw
-               tx.SetTextAlign(22);
-               tx.SetTextFont(42);
-               tx.SetTextSize(0.050);
-               tx.DrawLatexNDC(0.57, 0.55, "no hadron class in");
-               tx.DrawLatexNDC(0.57, 0.48, "the FCS Cluster category");
-               continue;
+            tx.SetTextSize(0.050);
+            tx.DrawLatexNDC(0.5, 0.955,
+                            Form("Efficiency and Purity %s (STAR FCS simulation): %s", axShort[ax], who[m].Data()));
+            tx.SetTextFont(42);
+            tx.SetTextSize(0.030);
+            tx.DrawLatexNDC(0.5, 0.905, Form("truth: %s;  %s", truthTxt[truthDef], sampleName[sample]));
+            TPad* body = new TPad(Form("body_%s_%d", axTag[ax], m), "", 0.0, 0.0, 1.0, 0.88);
+            body->SetFillStyle(0);
+            body->Draw();
+            body->Divide(3, 1);
+            for (int j = 0; j < 3; j++) {
+               const int k = panelCls[j];
+               body->cd(j + 1);
+               // title and legend sit in a band above the frame, never on the points
+               gPad->SetTopMargin(0.21);
+               gPad->SetLeftMargin(0.15);
+               gPad->SetRightMargin(0.04);
+               gPad->SetBottomMargin(0.13);
+               gPad->SetGridx();
+               gPad->SetGridy();
+               TH1F* fr = gPad->DrawFrame(uBins[0], 0, uBins[nUB], 1.1, Form(";%s;Efficiency / Purity", eAxisTitle[ax]));
+               (void)fr;
+               tx.SetTextAlign(12);
+               tx.SetTextFont(62);
+               tx.SetTextSize(0.055);
+               tx.DrawLatexNDC(0.15, 0.945, Form("%s: %s", m == 0 ? method : kRefName, panelName[j]));
+               if (m == 1 && k == 0) {
+                  // FCS Cluster has no hadron class: nothing to draw
+                  tx.SetTextAlign(22);
+                  tx.SetTextFont(42);
+                  tx.SetTextSize(0.050);
+                  tx.DrawLatexNDC(0.57, 0.55, "no hadron class in");
+                  tx.DrawLatexNDC(0.57, 0.48, "the FCS Cluster category");
+                  continue;
+               }
+               TGraphAsymmErrors* ge = drawEff(effP[m][k], kRed + 1, 20);
+               TGraphAsymmErrors* gp = drawEff(purP[m][k], kBlue + 1, 21);
+               TLegend* lg = new TLegend(0.15, 0.80, 0.90, 0.89);  // own row, under the title
+               lg->SetBorderSize(0);
+               lg->SetFillStyle(0);
+               lg->SetTextSize(0.050);
+               lg->SetNColumns(2);
+               if (ge) lg->AddEntry(ge, "Efficiency", "lp");
+               if (gp) lg->AddEntry(gp, "Purity", "lp");
+               lg->Draw();
             }
-            TGraphAsymmErrors* ge = drawEff(effP[m][k], kRed + 1, 20);
-            TGraphAsymmErrors* gp = drawEff(purP[m][k], kBlue + 1, 21);
-            TLegend* lg = new TLegend(0.15, 0.80, 0.90, 0.89);  // own row, under the title
-            lg->SetBorderSize(0);
-            lg->SetFillStyle(0);
-            lg->SetTextSize(0.050);
-            lg->SetNColumns(2);
-            if (ge) lg->AddEntry(ge, "Efficiency", "lp");
-            if (gp) lg->AddEntry(gp, "Purity", "lp");
-            lg->Draw();
+            cv->Print(pdf);
          }
-         cv->Print(pdf);
       }
    }
 
-   // page 4: efficiency and purity vs energy, all classes together
+   // efficiency and purity vs CLUSTER energy, all three classes on one pair of
+   // panes. Always the cluster energy, whatever energyAxis says: this is the
+   // page to read a working point off.
    cv->Clear();
    cv->Divide(2, 1);
    TLegend* leg[2];
@@ -864,7 +916,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       gPad->SetTopMargin(0.26);
       gPad->SetGridy();
       TH1F* fr = gPad->DrawFrame(eBins[0], 0, eBins[nEB], 1.05,
-                                 Form(";cluster E [GeV];%s", ytitle[p]));
+                                 Form(";cluster energy [GeV];%s", ytitle[p]));
       (void)fr;
       leg[p] = new TLegend(0.10, 0.755, 0.95, 0.985);
       leg[p]->SetBorderSize(0);
@@ -900,7 +952,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    if (gs1) lsep->AddEntry(gs1, method, "lp");
    if (gs2) lsep->AddEntry(gs2, Form("%s (category 2)", kRefName), "lp");
    lsep->Draw();
-   if (!haveSep) printf("  (no mcSepCell branch in %s - page 5 is empty)\n", infile);
+   if (!haveSep) printf("  (no mcSepCell branch in %s - the separation page is empty)\n", infile);
    cv->Print(pdf);
 
    // page 6: ePIC-style score distributions, split by input category
@@ -1014,7 +1066,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       const int nFeatPages = (NVAR + 7) / 8;
       cv->Print(nFeatPages > 0 ? pdf.Data() : (pdf + ")").Data());
 
-      // pages 9+: every input feature, one histogram per particle, unit area
+      // last pages: every input feature, one histogram per particle, unit area
       const int nClu = (int)featPart.size();
       for (int pg = 0; pg < nFeatPages; pg++) {
          cv->Clear();
@@ -1091,12 +1143,15 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       for (int t = 0; t < 3; t++) hScore[k][t]->Write();
       for (int q = 0; q < kNIn; q++) hIn[k][q]->Write();
    }
-   for (int k = 0; k < 3; k++) {
-      effU_ml[k]->Write();
-      purU_ml[k]->Write();
-      if (k > 0) {
-         effU_st[k]->Write();
-         purU_st[k]->Write();
+   for (int ax = 0; ax < kNAx; ax++) {
+      if (!axFill[ax]) continue;
+      for (int k = 0; k < 3; k++) {
+         effU_ml[ax][k]->Write();
+         purU_ml[ax][k]->Write();
+         if (k > 0) {
+            effU_st[ax][k]->Write();
+            purU_st[ax][k]->Write();
+         }
       }
    }
    effSep_ml->Write();
