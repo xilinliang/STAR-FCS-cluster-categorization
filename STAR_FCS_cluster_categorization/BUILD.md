@@ -1639,6 +1639,59 @@ What to check on the first 80 GeV run, in order:
    Adding 80 GeV γ and π⁰ without 80 GeV π⁻ would make that worse, not better,
    because it adds high-energy EM clusters and no hadronic counterpart.
 
+### First 80 GeV run — set 13, BDTG, weighted (`FcsCat13genw`)
+
+```csh
+root4star -b -q 'evalCategory.C+("feat_pico_80GeV.root","weights/FcsCat13genw_BDTG.weights.xml",13,"BDTG",1,"80GeV",0.5,0.8,"clusters",1,2)'
+```
+
+Overall efficiency 0.85 other / 0.88 onePhoton / 0.76 twoPhoton; the FCS Cluster
+category on the same clusters gets 0.41 onePhoton and 0.16 twoPhoton, and calls
+83 % of hadrons "one photon".
+
+**The two energy axes disagree, and that is the whole point of drawing both:**
+
+| hadronic panel | vs generated energy | vs cluster energy |
+|---|---|---|
+| efficiency | flat 0.85–0.88 to 78 GeV | ~0.90 to 28 GeV, 0.72 at 50–60, ~0 above 65 |
+| purity | rises to 0.97 | 0.88 at 10 → 0.52 at 35 → **0.14 at 60** → 0 above |
+
+The generated-energy page says the hadronic class is in excellent shape. The
+cluster-energy page says that above ~35 GeV fewer than half the clusters the
+model calls hadronic are hadronic, and by 60 GeV it is one in seven. Only the
+second number survives contact with a data analysis.
+
+**The failure mode flipped relative to the 1–60 GeV runs.** There, the hadronic
+*efficiency* collapsed above 30 GeV and purity held; here efficiency holds and
+*purity* collapses — the model over-calls hadronic at high energy. That is the
+weighted-model signature already measured in **The energy prior**, now louder
+because the 80 GeV point added γ and π⁰ with no hadronic counterpart: the `logE`
+panel of the per-particle pages shows γ and π⁰ spiking at logE ≈ 4.4 while π⁻ has
+died out by logE ≈ 3.5. The weighting asks for equal classes in bins where one
+class barely exists, and a weight cannot create clusters. **Rerun unweighted**
+(`weightMode=0`) before quoting anything from an 80 GeV sample; π⁻ guns at the
+top of the range remain the highest-value thing to generate.
+
+Two results the 80 GeV point bought regardless of the weighting:
+
+- **The finer separation bins paid off.** In the new 0–0.25 tower bin — where an
+  80 GeV π⁰ lives, opening ≈ 0.43 towers — BDTG gets 0.63, down from the ~0.80
+  plateau it holds from 0.25 to 1 tower. That drop was invisible inside the old
+  first bin. FCS Cluster is at ~0.10 there.
+- **A real trade at the top of the range.** Merged-π⁰ efficiency *rises* with
+  cluster energy (0.68 at 20 GeV → 0.85 at 65 → 0.96 at 82) while Single EM
+  *falls* (0.93 at 55 → 0.70 at 75 → 0.53 at 82). At 80 GeV a merged π⁰ and a
+  single photon are nearly the same object and the model resolves the ambiguity
+  toward π⁰. The 80 GeV point therefore costs single-photon efficiency; that
+  belongs in any statement of where the model is usable.
+
+And the strongest argument in the file: on the cluster-energy page the FCS
+Cluster Single EM efficiency falls to ~0 above 40 GeV and its merged-π⁰
+efficiency peaks at 0.45 near 35–40 GeV then decays to ~0.05 by 70 GeV. Above
+~50 GeV STAR's categorization labels essentially everything ambiguous, so the
+model is the only thing producing a decision up there — with the purity caveat
+above attached to it.
+
 ## When it goes wrong
 
 Every one of these actually happened while building this; the cause is rarely
