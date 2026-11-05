@@ -1012,6 +1012,26 @@ a sample it has already merged goes straight to the QA: a second pass with a
 different `WEIGHTMODE` costs only the training and the evaluations, not another
 `hadd`.
 
+Because the merge is reused, **a re-run only has to name the files that might
+still need dumping** — on a second pass over a sample already merged, the list
+can be just the newest files:
+
+```csh
+# first pass: the full list, which is what gets merged
+./runTrainAll.sh 80GeV gamma.e{10,20,30,40,50,60,80}... pi0.e{...}... pi-.e{...}...
+
+# second pass, different WEIGHTMODE: the 80 GeV files alone are enough
+env WEIGHTMODE=1 ./runTrainAll.sh 80GeV gamma.e80...root pi0.e80...root pi-.e80...root
+```
+
+The list is only used to decide what to dump and to check nothing is missing;
+the training still runs on the whole merged tree. What went into the merge is
+recorded in `feat_pico_<tag>.inputs`, and naming a file the merge does *not*
+contain stops the script with the command to rebuild — otherwise it would train
+on the old sample while looking as though the new file had been included. A
+merge made before that record existed is reused with a note saying it was not
+checked.
+
 `evalCategory.C` prints an extra table for such a sample: efficiency and purity
 per class **per energy band**, with the FCS Cluster category on the line beneath.
 The bands are found from the gaps in the generated energy — consecutive populated

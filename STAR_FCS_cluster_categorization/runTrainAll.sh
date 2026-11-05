@@ -52,6 +52,12 @@
 # is kept as well: if feat_pico_<tag>.root is already there this script goes
 # straight to the QA, so re-running it with a different WEIGHTMODE costs only
 # the training and the evaluations.
+#
+# Because the merge is reused, a re-run only has to name the files whose DUMPS
+# might still be missing - on a second pass over a sample already merged, the
+# list can be just the newest files, or even one of them. What was merged is
+# recorded in feat_pico_<tag>.inputs and checked: naming a file the merge does
+# not contain stops the script rather than quietly training on the old sample.
 
 set -e
 tag="$1"
@@ -100,11 +106,39 @@ for f in "$@"; do
    dumps="$dumps $d"
 done
 
+# WHAT WENT INTO THE MERGE, recorded beside it. The merge is reused when it is
+# already there, which is what makes a second pass cheap - but it also means the
+# file list on the command line is NOT necessarily what gets trained on. Naming
+# fewer files than the merge holds is fine and deliberate: pass just the new
+# 80 GeV files to re-train on an existing 10-80 GeV merge. Naming a file the
+# merge does NOT hold is a mistake worth stopping for, because the only reason
+# to name it was to include it.
+inputs="feat_pico_${tag}.inputs"
 if [ -f "$feat" ]; then
-   echo "== $feat exists, not re-merging (delete it to rebuild)"
+   if [ -f "$inputs" ]; then
+      missing=""
+      for d in $dumps; do
+         grep -qxF "$d" "$inputs" || missing="$missing $d"
+      done
+      if [ -n "$missing" ]; then
+         echo "ERROR: $feat was merged WITHOUT:$missing"
+         echo "       Training now would silently use the old sample."
+         echo "       To rebuild the merge with them in it:"
+         echo "          rm $feat $inputs"
+         echo "          $0 $tag <the FULL file list, old files included>"
+         exit 1
+      fi
+      echo "== $feat exists and holds every file named ($(wc -l < "$inputs") in all), not re-merging"
+   else
+      echo "== $feat exists, not re-merging (delete it to rebuild)"
+      echo "   NOTE: it predates the input record, so what is actually in it is"
+      echo "         not checked against the files named on the command line"
+   fi
 else
    echo "== merging into $feat"
    hadd -f "$feat" $dumps
+   : > "$inputs"
+   for d in $dumps; do echo "$d" >> "$inputs"; done
 fi
 
 # ---- 2. QA what is about to be trained on -----------------------------------
