@@ -1758,6 +1758,42 @@ comparisons, where the MLP suffered far more from the weighting than the BDTG di
 gone. **Check `ovCheck_80GeV_MLP.log` before adopting it** — the MLP is the more
 overtraining-prone of the two, and a train-half/test-half gap would undo this.
 
+### What the low-energy merged-π⁰ numbers do and do not say
+
+The minimum π⁰ opening is ≈ `34.7/E` towers — 1.7 at 20 GeV, 3.5 at 10, 6.9 at
+5 — so below ~20 GeV most π⁰s resolve into two clusters. The Merged π⁰ panel
+nevertheless holds ~0.82 efficiency and ~0.77 purity down to 5 GeV, and the
+reason is a selection effect in `truthDef=1`, not a model that beats the opening
+angle.
+
+A resolved π⁰ gives two clusters each holding ONE photon, so neither is a
+"π⁰-gun cluster holding both photons". They get no class and are dropped before
+anything is filled (`if (truth < 0) { nNoLabel++; continue; }`), which removes
+them from the numerator AND both denominators. So the panel answers the narrow
+question **"given a cluster that really contains both photons, does the model say
+so?"** — at low energy over the minority of π⁰s that merged anyway: very
+asymmetric decays whose soft photon lands in the same cluster, and pairs the
+clustering merged despite the opening.
+
+**The purity is flattered more than the efficiency** by that same `continue`. The
+most natural low-energy fake — one photon of a resolved π⁰ tagged as a merged π⁰
+— never reaches the purity denominator, because that cluster has no truth label.
+Data grants no such exemption, so the low-energy π⁰ purity here is an upper bound
+on what the same model would give on a sample where every cluster is accounted
+for.
+
+The physics is still visible rather than hidden: the lowest bin collapses
+(efficiency 0.37 at 2.5 GeV), and the separation page falls as it should — ~0.80
+between 0.25 and 1 tower, 0.55 at 2.25, 0.33 at 2.75.
+
+`truthDef=2` gives the harsher number, every cluster of a π⁰ event required to be
+called merged π⁰ so a resolved π⁰ counts as an inefficiency; expect that panel to
+fall steeply below 20 GeV. Neither number is a π⁰-finding efficiency, though:
+that is an event-level question for the π⁰ finder, which reconstructs a
+low-energy π⁰ perfectly well *as two separate clusters*. The categorizer's job is
+only to flag the clusters that need two points fitted to them, which is what
+`truthDef=1` measures.
+
 ### Correction: the high-energy hadronic cliff is not a sampling problem
 
 Earlier entries, including the one above, called for π⁻ guns at the top of the
