@@ -39,6 +39,13 @@
 //      of a pi- event Hadronic, of a pi0 event Merged pi0 - exactly "which
 //      sample did it come from". A resolved pi0 then counts as a Merged-pi0
 //      INefficiency, so expect that panel to fall at low energy.
+//   3  the SAMPLE definition (StFcsSampleLabel.h), the cross-check: like 2,
+//      but a pi0 event is split - the cluster holding both photons is the
+//      Merged pi0 and every OTHER cluster of that event is Single EM, which
+//      is what the two clusters of a resolved pi0 physically are. Nothing is
+//      dropped, so unlike truthDef=1 the purity denominator contains every
+//      cluster the model was shown, resolved pi0 photons included. Needs
+//      genPid AND mcLabel, and costs one extra pass over the tree.
 // truthDef 1 and 2 need the genPid branch.
 //
 // WHICH ENERGY ON THE X AXIS - energyAxis:
@@ -131,6 +138,7 @@
 
 #include "StRoot/StFcsMLCategoryMaker/StFcsClusterFeatures.h"
 #include "StRoot/StFcsMLCategoryMaker/StFcsTrainTestSplit.h"
+#include "StRoot/StFcsMLCategoryMaker/StFcsSampleLabel.h"
 
 namespace {
 
@@ -253,7 +261,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
                   float eMin = 0.5,
                   float purityCut = 0.8,
                   const char* treename = "clusters",
-                  int truthDef = 0,     // 0 mcLabel, 1 gun particle cleaned, 2 gun particle raw - see header
+                  int truthDef = 0,     // 0 mcLabel, 1 gun cleaned, 2 gun raw, 3 sample-based - see header
                   int energyAxis = 2,   // ePIC-style pages: 0 cluster E, 1 generated E, 2 both
                   float eAxisMax = 0) { // upper end of the energy axes; 0 = automatic
    using namespace StFcsClusterFeatures;
@@ -331,10 +339,22 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       if (in->GetBranch("genE")) in->SetBranchAddress("genE", &genE);
    }
 
-   if (truthDef < 0 || truthDef > 2) truthDef = 0;
+   if (truthDef < 0 || truthDef > 3) truthDef = 0;
    if (truthDef > 0 && !haveGen) {
       printf("truthDef=%d needs the genPid branch, which %s does not have - using mcLabel\n", truthDef, infile);
       truthDef = 0;
+   }
+   // truthDef=3 is decided per EVENT, so it needs its own pass over the tree
+   // before the feature branches are hooked up (StFcsSampleLabel.h).
+   std::vector<signed char> sampleLab;
+   if (truthDef == 3) {
+      StFcsSampleLabel::Report srep;
+      if (StFcsSampleLabel::build(infile, treename, sampleLab, eMin, &srep) < 0) {
+         printf("truthDef=3 needs both genPid and mcLabel in %s - using mcLabel\n", infile);
+         truthDef = 0;
+      } else {
+         StFcsSampleLabel::printReport(srep);
+      }
    }
    if (energyAxis < 0 || energyAxis > 2) energyAxis = 2;
    if (energyAxis != 0 && !haveGen) {
@@ -368,8 +388,9 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    if (eTop <= eMin + 1) eTop = eMin + 10;
    printf("energy axes run 0 - %.3g GeV, from %s\n", eTop, eTopFrom);
 
-   const char* truthTxt[3] = {"photons inside the cluster (mcLabel)", "gun particle, cleaned",
-                              "gun particle, every cluster of the event"};
+   const char* truthTxt[4] = {"photons inside the cluster (mcLabel)", "gun particle, cleaned",
+                              "gun particle, every cluster of the event",
+                              "input sample (1EM / MergedPi0 / Hadron), every cluster"};
 
    // ------------------------------------------------------------ histograms
    // fine at low energy, coarse at high energy, extended to eTop
@@ -523,6 +544,9 @@ void evalCategory(const char* infile = "feat_pico_all.root",
          // the gun particle decides, raw: every cluster of the event
          const int gs = partSlot(genPid);  // 0 gamma, 1 pi0, 2 pi-
          truth = (gs == 0) ? 1 : (gs == 1) ? 2 : (gs == 2) ? 0 : -1;
+      } else if (truthDef == 3) {
+         // decided per event in the pass above, indexed by entry number
+         truth = (i < (Long64_t)sampleLab.size()) ? (int)sampleLab[(size_t)i] : -1;
       }
       // ePIC-style input category, for the score page; a resolved pi0 photon
       // has one even when truthDef=1 leaves it without a truth class

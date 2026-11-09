@@ -88,8 +88,19 @@
 //     overwrite the mcLabel model:
 //       root4star -b -q 'trainTMVA.C+("feat_pico_all.root","FcsCat",13,"clusters",0.8,0.5,1)'
 //       -> weights/FcsCat13gen_BDTG.weights.xml
+//   2 SAMPLE-BASED (StFcsSampleLabel.h), decided per EVENT and dropping
+//     nothing: every cluster of a gamma event is single EM, every cluster of
+//     a pi- event hadronic, and a pi0 event is SPLIT - the cluster holding
+//     both photons is the merged pi0, every other cluster of that event is
+//     single EM, which is what the two clusters of a resolved pi0 are. So,
+//     unlike labelDef=1, resolved pi0 photons ARE trained on, as single EM.
+//     Needs genPid and mcLabel, and costs one extra pass over the tree. The
+//     job gets an "smp" suffix:
+//       root4star -b -q 'trainTMVA.C+("feat_pico_all.root","FcsCat",13,"clusters",0.8,0.5,2)'
+//       -> weights/FcsCat13smp_BDTG.weights.xml
+//     Pair it with evalCategory.C truthDef=3, which is the same definition.
 //     The class order - and so the order of the three scores - is the same
-//     for both: r[0] hadronic/other, r[1] single EM, r[2] merged pi0.
+//     for all three: r[0] hadronic/other, r[1] single EM, r[2] merged pi0.
 //
 // TRAINING WEIGHTS (weightMode, the argument after labelDef)
 //   0 (default) every cluster counts once.
@@ -142,6 +153,7 @@
 #include "StRoot/StFcsMLCategoryMaker/StFcsClusterFeatures.h"
 #include "StRoot/StFcsMLCategoryMaker/StFcsTrainTestSplit.h"
 #include "StRoot/StFcsMLCategoryMaker/StFcsEnergyWeights.h"
+#include "StRoot/StFcsMLCategoryMaker/StFcsSampleLabel.h"
 
 void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
                const char* jobname = "FcsCat",
@@ -149,7 +161,7 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
                const char* treename = "clusters",
                float purityCut = 0.8,
                float eMin = 0.5,
-               int labelDef = 0,             // 0 mcLabel, 1 generated particle (ePIC-style)
+               int labelDef = 0,             // 0 mcLabel, 1 generated particle, 2 sample-based
                int weightMode = 0,           // 0 unweighted, 1 flat in cluster energy
                int normMode = 0) {           // 0 NumEvents, 1 EqualNumEvents - see below
    using namespace StFcsClusterFeatures;
@@ -158,10 +170,11 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
 
    const int NVAR = nVar(featureSet);
    const char** varname = varNames(featureSet);
-   if (labelDef != 1) labelDef = 0;
+   if (labelDef < 0 || labelDef > 2) labelDef = 0;
    if (weightMode != 1) weightMode = 0;
    if (normMode != 1) normMode = 0;
-   const TString job = Form("%s%d%s%s%s", jobname, featureSet, labelDef == 1 ? "gen" : "",
+   const TString job = Form("%s%d%s%s%s", jobname, featureSet,
+                            labelDef == 1 ? "gen" : labelDef == 2 ? "smp" : "",
                             weightMode == 1 ? "w" : "", normMode == 1 ? "eq" : "");
    printf("training feature set %d (%d variables), job %s\n", featureSet, NVAR, job.Data());
 
@@ -201,10 +214,24 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    Int_t genPid = 0;
    if (in->GetBranch("genPid")) {
       in->SetBranchAddress("genPid", &genPid);
-   } else if (labelDef == 1) {
-      printf("labelDef=1 labels by the generated particle, but %s has no genPid branch.\n"
-             "Re-dump it with the current feature maker, or use labelDef=0.\n", infile);
+   } else if (labelDef > 0) {
+      printf("labelDef=%d labels by the generated particle, but %s has no genPid branch.\n"
+             "Re-dump it with the current feature maker, or use labelDef=0.\n", labelDef, infile);
       return;
+   }
+
+   // labelDef=2 is decided per EVENT, so it needs its own pass over the tree
+   // first (StFcsSampleLabel.h opens the file on a private handle, so this is
+   // safe to call with the feature branches already hooked up).
+   std::vector<signed char> sampleLab;
+   if (labelDef == 2) {
+      StFcsSampleLabel::Report srep;
+      if (StFcsSampleLabel::build(infile, treename, sampleLab, eMin, &srep) < 0) {
+         printf("labelDef=2 needs both genPid and mcLabel in %s - re-dump it, or use\n"
+                "labelDef=1.\n", infile);
+         return;
+      }
+      StFcsSampleLabel::printReport(srep);
    }
 
    // ------------------------------------------------- flat training trees
@@ -302,6 +329,15 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
             nNotSample++;
             continue;
          }
+      } else if (labelDef == 2) {
+         // sample-based: decided per event in the pass above. It does not go
+         // through trainingLabel at all - a cluster with no usable mcLabel
+         // still belongs to its event's sample.
+         cls = (i < (Long64_t)sampleLab.size()) ? (int)sampleLab[(size_t)i] : -1;
+         if (cls < 0) {
+            nNotSample++;
+            continue;
+         }
       }
       if (cls < 0) {
          if (mcLabel < 0 && truthNPhoton < 0)
@@ -376,16 +412,22 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    printf("  no usable tower list         : %lld\n", nNoTowers);
    if (labelDef == 1)
       printf("  not a training class (labelDef=1: resolved pi0 photon, fragment, other gun): %lld\n", nNotSample);
+   if (labelDef == 2)
+      printf("  not a training class (labelDef=2: cluster of an unrecognised gun): %lld\n", nNotSample);
    printf("  KEPT  other=%lld  1photon=%lld  2photon=%lld\n", kept[0], kept[1], kept[2]);
    printf("  split by event (%ld events): train %lld / %lld / %lld, test %lld / %lld / %lld\n",
           nEventsSeen, kept[0] - keptTest[0], kept[1] - keptTest[1], kept[2] - keptTest[2],
           keptTest[0], keptTest[1], keptTest[2]);
    if (weightMode == 1) printf("  training weights: flat in cluster energy (see the table above)\n");
-   printf("  label source: %s\n", labelDef == 1 ? "generated particle (genPid), cleaned with mcLabel"
-                                 : haveMcBranch  ? "mcLabel (generator level)"
-                                                 : "truthNPhoton (hit level); no mcLabel branch");
-   if (labelDef == 1)
+   printf("  label source: %s\n",
+          labelDef == 2 ? "input sample, decided per event (StFcsSampleLabel.h)"
+          : labelDef == 1 ? "generated particle (genPid), cleaned with mcLabel"
+          : haveMcBranch  ? "mcLabel (generator level)"
+                          : "truthNPhoton (hit level); no mcLabel branch");
+   if (labelDef > 0)
       printf("  classes: other = hadronic (pi-), onePhoton = single EM (gamma), twoPhoton = merged pi0\n");
+   if (labelDef == 2)
+      printf("  (resolved pi0 photons are trained on here, as single EM - unlike labelDef=1)\n");
 
    if (kept[0] + kept[1] + kept[2] == 0) {
       printf("\nNothing to train on. Reading the numbers above:\n");

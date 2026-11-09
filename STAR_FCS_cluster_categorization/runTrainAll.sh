@@ -30,7 +30,8 @@
 #   cmp_<tag><rt>.pdf      BDTG vs MLP on one figure
 #   ov<tag><rt>_*          the training-half evaluations, for the overtraining gap
 #
-# Set FEATURESET, EMIN, WEIGHTMODE or NORMMODE in the environment to override:
+# Set FEATURESET, EMIN, WEIGHTMODE, NORMMODE or LABELDEF in the environment to
+# override:
 #
 #   env WEIGHTMODE=1 ./runTrainAll.sh ...
 #
@@ -71,6 +72,18 @@ fset="${FEATURESET:-13}"
 emin="${EMIN:-0.5}"
 wgt="${WEIGHTMODE:-0}"
 nrm="${NORMMODE:-0}"
+# LABELDEF picks the truth definition, and the evaluation follows it so the
+# model is always judged against the labels it was trained on:
+#   1 (default) generated particle, cleaned - resolved pi0 photons dropped
+#   2           sample-based, nothing dropped (StFcsSampleLabel.h) -> truthDef=3
+#   0           mcLabel, the photons inside each cluster           -> truthDef=0
+lbl="${LABELDEF:-1}"
+case "$lbl" in
+   0) tdef=0 ;;
+   1) tdef=1 ;;
+   2) tdef=3 ;;
+   *) echo "LABELDEF must be 0, 1 or 2"; exit 1 ;;
+esac
 feat="feat_pico_${tag}.root"
 # Earlier runs of this script wrote feat_<tag>.root. If that file is there and
 # the new name is not, use it rather than spending another hadd on the same
@@ -81,11 +94,15 @@ if [ ! -f "$feat" ] && [ -f "feat_${tag}.root" ]; then
 fi
 job="FcsCat"
 # trainTMVA.C builds its job name as <job><set><gen><w><eq>; mirror it exactly.
-wtag="${job}${fset}gen"            # labelDef=1 -> "gen"
+wtag="${job}${fset}"
+[ "$lbl" = "1" ] && wtag="${wtag}gen"   # labelDef=1 -> "gen"
+[ "$lbl" = "2" ] && wtag="${wtag}smp"   # labelDef=2 -> "smp"
 [ "$wgt" = "1" ] && wtag="${wtag}w"
 [ "$nrm" = "1" ] && wtag="${wtag}eq"
 # run tag on the OUTPUT names, so two modes on one sample do not collide
 rt=""
+[ "$lbl" = "0" ] && rt="${rt}_mc"
+[ "$lbl" = "2" ] && rt="${rt}_smp"
 [ "$wgt" = "1" ] && rt="${rt}_w1"
 [ "$nrm" = "1" ] && rt="${rt}_eq"
 
@@ -146,9 +163,9 @@ fi
 echo "== QA of the merged sample"
 root4star -b -q "qaFeatures.C+(\"$feat\",\"qa_${tag}\",$emin)" 2>&1 | tee "qa_${tag}.log"
 
-# ---- 3. train: generated-particle labels ------------------------------------
-echo "== training set $fset, labelDef=1, weightMode=$wgt, normMode=$nrm -> $wtag"
-root4star -b -q "trainTMVA.C+(\"$feat\",\"$job\",$fset,\"clusters\",0.8,$emin,1,$wgt,$nrm)" \
+# ---- 3. train ---------------------------------------------------------------
+echo "== training set $fset, labelDef=$lbl, weightMode=$wgt, normMode=$nrm -> $wtag"
+root4star -b -q "trainTMVA.C+(\"$feat\",\"$job\",$fset,\"clusters\",0.8,$emin,$lbl,$wgt,$nrm)" \
    2>&1 | tee "train_${tag}${rt}.log"
 
 # ---- 4. evaluate both methods, test half and training half ------------------
@@ -159,10 +176,10 @@ for m in BDTG MLP; do
       continue
    fi
    echo "== evaluating $m (test half)"
-   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",1,\"eval${tag}${rt}_${m}\",$emin,0.8,\"clusters\",1,2)" \
+   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",1,\"eval${tag}${rt}_${m}\",$emin,0.8,\"clusters\",$tdef,2)" \
       2>&1 | tee "eval${tag}${rt}_${m}.log"
    echo "== evaluating $m (training half, for the overtraining gap)"
-   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",0,\"ov${tag}${rt}_${m}\",$emin,0.8,\"clusters\",1,2)" \
+   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",0,\"ov${tag}${rt}_${m}\",$emin,0.8,\"clusters\",$tdef,2)" \
       2>&1 | tee "ov${tag}${rt}_${m}.log"
 done
 

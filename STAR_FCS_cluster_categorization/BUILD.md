@@ -453,6 +453,7 @@ arguments, after `treename`, set what "true" means and what the x axis is:
 | `0` (default) | it holds 1 photon / no photon / 2 photons (`mcLabel`) — what the model is trained on |
 | `1` | γ-gun cluster holding the photon / any π⁻ cluster / π⁰-gun cluster holding both photons; gun fragments and resolved π⁰ photons are dropped |
 | `2` | it comes from a γ / π⁻ / π⁰ event, whatever it contains — pure sample identity, as in a single-particle study; resolved π⁰s then count against Merged π⁰ |
+| `3` | the **sample** definition — like `2`, but a π⁰ event is split: the cluster holding both photons is Merged π⁰ and every other cluster of that event is Single EM. Nothing is dropped. See below |
 
 `energyAxis` chooses the x axis of that figure:
 
@@ -461,6 +462,9 @@ arguments, after `treename`, set what "true" means and what the x axis is:
 | `0` | **cluster energy** only — the energy of the cluster being categorized, the quantity the model is given and the only one a data analysis can bin in |
 | `1` | **generated energy** only — the gun particle's energy; needs `genE` |
 | `2` (default) | **both**, cluster-energy pages first, so one run gives four pages |
+
+(That is `energyAxis`, the argument after `truthDef` — not to be confused with
+`truthDef=2`.)
 
 Both sets are always *filled* when `genE` is there, so the `.root` file carries
 both whatever the pdf was asked to draw, and `runTrainAll.sh` / `runCrossCheck.sh`
@@ -489,6 +493,74 @@ follow the sample, as in `qaFeatures.C`: the `e60` in `feat_pi0.e60...root` give
 36 GeV, 4 GeV up to 64 and 5 GeV above. Only
 the axes change — the confusion matrices and the printed numbers always use every
 cluster.
+
+### `truthDef=3` / `labelDef=2` — the sample-based cross-check
+
+`truthDef=1` drops every cluster it cannot place, and a dropped cluster leaves
+the efficiency numerator **and the purity denominator**. The two clusters of a
+resolved π⁰ are the big case: they hold one photon each, so neither is a merged
+π⁰, and if the model tags one as merged it costs nothing. That is why the
+low-energy merged-π⁰ purity is an upper bound.
+
+`truthDef=3` has no such exit. Decided per **event** (`StFcsSampleLabel.h`):
+
+| event | clusters |
+|---|---|
+| γ (pid 1) | every cluster → **1EM** |
+| π⁻ (pid 9) | every cluster → **Hadron** |
+| π⁰ (pid 7) | the highest-energy cluster with `mcLabel >= 2`, if the event has one → **MergedPi0**; every other cluster of that event → **1EM** |
+
+So a resolved π⁰ puts both its clusters into the 1EM sample, which is what they
+physically are, and a merged π⁰ puts its one cluster into MergedPi0. Then for
+each class *k*, over the three samples together:
+
+```
+efficiency(k) = (model says k, among the k sample) / (the k sample)
+purity(k)     = (model says k, among the k sample) / (model says k, in ALL three samples)
+```
+
+Every cluster of a recognised gun event is in exactly one sample, so the purity
+denominator covers everything the model was shown — resolved π⁰ photons
+included. Compare the merged-π⁰ purity here with `truthDef=1` and the gap is a
+direct measurement of how much the cleaned definition was flattering you.
+
+Two differences from the other definitions worth holding on to. A cluster in a
+π⁻ event stays Hadron even when a shower π⁰ put a photon in it, where `mcLabel`
+(`truthDef=0`) would call it single-EM — this definition says a cluster in a
+hadronic event *is* hadronic background. And the 1EM efficiency now mixes prompt
+photons with resolved-π⁰ photons; they are the same object to a shower-shape
+classifier but not to an analysis, so read this beside `truthDef=1`, not instead
+of it.
+
+The π⁰ split uses `mcLabel >= 2`, so it inherits the ~4-tower labelling ceiling
+of the 11 cm match radius: beyond that the event is called resolved and both
+clusters go to 1EM.
+
+The matching training label is **`labelDef=2`**, which trains on exactly these
+samples — resolved π⁰ photons included, as single EM — and tags its job `smp`
+(`weights/FcsCat13smp_BDTG.weights.xml`). `runTrainAll.sh` wires the pair
+together through `LABELDEF`, and the evaluation always follows the training:
+
+```csh
+env LABELDEF=2 ./runTrainAll.sh 80GeV gamma.e80...root pi0.e80...root pi-.e80...root
+```
+
+| `LABELDEF` | weight file | evaluated with | outputs |
+|---|---|---|---|
+| `1` (default) | `FcsCat13gen_*` | `truthDef=1` | `eval<tag>_*` |
+| `2` | `FcsCat13smp_*` | `truthDef=3` | `eval<tag>_smp_*` |
+| `0` | `FcsCat13_*` | `truthDef=0` | `eval<tag>_mc_*` |
+
+Both macros print the sample breakdown before they start — clusters per sample,
+events per gun, and what fraction of π⁰ events produced a merged cluster, which
+is the number that says how much of the π⁰ sample the merged class actually
+covers at each energy.
+
+Because the class of a cluster depends on the other clusters of its event, this
+definition costs one extra pass over the tree. It is read on a private file
+handle rather than the caller's tree: hooking branch addresses onto a tree the
+caller is already reading, then resetting them, silently detaches every feature
+branch, and the resulting garbage does not look like an error.
 
 **Per generated particle.** Every feature file now carries `genPid`, `genE` and
 `nGen`: the GEANT id and energy of the generated (gun) particle of the event — for
