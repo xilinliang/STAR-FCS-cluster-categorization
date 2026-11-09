@@ -1893,6 +1893,7 @@ what the message says.
 
 | symptom | cause | fix |
 |---|---|---|
+| `fatal error: StMaker.h: No such file or directory` from `cons`, on the FIRST package it builds | `cons` is running outside the SL7 container. The compile line gives it away: `-Dal98_x8664_gcc11` (Alma 9 / gcc 11) with a `linux-rhel7.../gcc-4.8.5/root-5.34.38` include path, and no `-I$STAR/.$STAR_HOST_SYS/include` — `dev` has no build for that platform, so the flattened header tree STAR headers are found through does not exist | enter the container and `starver` first (section 0). Inside, check `echo $STAR_HOST_SYS` is not `al98_x8664_gcc11` and `ls $STAR/.$STAR_HOST_SYS/include/StMaker.h` resolves. Then `rm -rf .al98_x8664_gcc11` so the dead tree is not mistaken for a build |
 | `dlopen error: StPicoDstMaker.so: undefined symbol: _ZN7StMuDst16mMuFmsCollectionE` | `StPicoDstMaker` links against `StMuDSTMaker` even when only reading | load `Load.C` and `StMuDSTMaker/COMMON/macros/loadSharedLibraries.C` first — `runPicoDst_ml.C` does |
 | `dlopen error: ... undefined symbol: _ZN24StFcsClusterFeatureMaker7kMaxTrkE` | a `static const int` odr-used (`std::min` takes `const&`) with no out-of-class definition; `cons` links it anyway, it only fails at load | define it in the `.cxx`: `const int Class::kConst;` |
 | `Error: Too many '}' tmpfile:NN` | CINT mishandling `#if`/`#else` inside a function body | no preprocessor branches in macro bodies; run with `trainTMVA.C+` |
