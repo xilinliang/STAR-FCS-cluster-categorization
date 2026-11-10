@@ -163,6 +163,14 @@ fi
 echo "== QA of the merged sample"
 root4star -b -q "qaFeatures.C+(\"$feat\",\"qa_${tag}\",$emin)" 2>&1 | tee "qa_${tag}.log"
 
+# labelDef=2 ranks the clusters of an event and keeps only some of them, so QA
+# what actually reaches each class before training on it.
+if [ "$lbl" = "2" ]; then
+   echo "== QA of the sample definition (what goes into each class)"
+   root4star -b -q "qaSampleLabel.C+(\"$feat\",\"qsmp_${tag}\",$emin,0)" \
+      2>&1 | tee "qsmp_${tag}.log"
+fi
+
 # ---- 3. train ---------------------------------------------------------------
 echo "== training set $fset, labelDef=$lbl, weightMode=$wgt, normMode=$nrm -> $wtag"
 root4star -b -q "trainTMVA.C+(\"$feat\",\"$job\",$fset,\"clusters\",0.8,$emin,$lbl,$wgt,$nrm)" \

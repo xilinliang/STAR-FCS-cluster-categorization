@@ -17,20 +17,39 @@
 //
 // THE SAMPLES, decided per EVENT:
 //
-//   gamma event (GEANT3 pid 1)  every cluster -> 1EM           (class 1)
-//   pi- event   (pid 9)         every cluster -> Hadron        (class 0)
-//   pi0 event   (pid 7)         the highest-energy cluster with mcLabel >= 2,
-//                               if the event has one           -> MergedPi0 (2)
-//                               every other cluster of it      -> 1EM       (1)
+//   gamma event (GEANT3 pid 1)  the HIGHEST-ENERGY cluster -> 1EM  (class 1)
+//                               every other cluster        -> dropped
+//   pi- event   (pid 9)         every cluster              -> Hadron (class 0)
+//   pi0 event   (pid 7)         if the event has a cluster with mcLabel >= 2,
+//                                 the highest-energy such  -> MergedPi0  (2)
+//                                 and every OTHER cluster  -> dropped
+//                               otherwise (resolved):
+//                                 the TWO highest-energy   -> 1EM        (1)
+//                                 any further cluster      -> dropped
 //   any other gun               no class, dropped
 //
-// So a RESOLVED pi0 contributes both its clusters to the 1EM sample, which is
-// what they physically are - one photon each - and a MERGED pi0 contributes
-// its one cluster to the MergedPi0 sample. A pi0 event never contributes to
-// the Hadron sample, and a pi- event never leaves it, whatever the shower did:
-// a cluster in a pi- event IS hadronic background, even when a shower pi0 put
-// a photon in it. That is the difference from mcLabel (truthDef=0), which
-// would call such a cluster single-EM.
+// Only clusters at or above eMin are considered; a cluster below it is never
+// labelled, never "dropped", and never a candidate, so what the labels
+// describe is exactly what the caller will use.
+//
+// WHY THE 1EM SAMPLE IS TRIMMED. A photon gun makes ONE photon and a resolved
+// pi0 makes TWO, so one and two clusters respectively are all the single-EM
+// objects an event can contain. Anything further is a fragment, a secondary or
+// a split-off, and feeding those to the 1EM class teaches it that the junk
+// around a shower is a photon. The energy ranking is the selection: no truth
+// matching, so it stays close to what an analysis could do for itself.
+//
+// AND WHY A MERGED pi0 EVENT CONTRIBUTES NOTHING TO 1EM. The event's two
+// photons are both inside the merged cluster, so there is no single-EM object
+// left in it. Any other cluster in such an event is, by construction, not one
+// of the pi0's photons.
+//
+// A pi- event never leaves the Hadron sample, whatever the shower did: a
+// cluster in a pi- event IS hadronic background, even when a shower pi0 put a
+// photon in it. That is the difference from mcLabel (truthDef=0), which would
+// call such a cluster single-EM. The hadronic sample is the one place every
+// cluster is kept, because a hadron genuinely does spread over several and no
+// subset of them is more "the hadron" than the rest.
 //
 // Then, for each class k, over the three samples together:
 //   efficiency(k) = (model says k, among the k sample) / (the k sample)
@@ -86,10 +105,13 @@ const int kPiMinus = 9;
 struct Report {
    Long64_t nClus[3];  // clusters per sample: 0 Hadron, 1 1EM, 2 MergedPi0
    Long64_t nEvt[3];   // events per gun: 0 gamma, 1 pi0, 2 pi-
+   Long64_t nKept[3];  // clusters given a class, per gun (pi0 feeds two samples)
+   Long64_t nDrop[3];  // clusters above eMin left out by the ranking, per gun
    Long64_t nMerged;   // pi0 events that produced a merged cluster
+   Long64_t nBelowE;   // clusters below eMin, never candidates
    Long64_t nNoGun;    // clusters of an unrecognised gun, left without a class
-   Report() : nMerged(0), nNoGun(0) {
-      for (int i = 0; i < 3; i++) nClus[i] = nEvt[i] = 0;
+   Report() : nMerged(0), nBelowE(0), nNoGun(0) {
+      for (int i = 0; i < 3; i++) nClus[i] = nEvt[i] = nKept[i] = nDrop[i] = 0;
    }
 };
 
@@ -100,36 +122,86 @@ inline void finishEvent(int gun, const std::vector<Long64_t>& idx, const std::ve
                         std::vector<signed char>& label, Report& rep) {
    const size_t n = idx.size();
    if (n == 0) return;
-
-   if (gun == kGamma || gun == kPiMinus) {
-      const signed char k = (gun == kGamma) ? 1 : 0;
-      for (size_t i = 0; i < n; i++) label[(size_t)idx[i]] = k;
-      rep.nClus[(int)k] += (Long64_t)n;
-      rep.nEvt[(gun == kGamma) ? 0 : 2] += 1;
+   if (gun != kGamma && gun != kPi0 && gun != kPiMinus) {
+      rep.nNoGun += (Long64_t)n;  // labels stay -1
       return;
    }
 
-   if (gun == kPi0) {
-      // the merged cluster, if the event made one: the highest energy among
-      // the clusters holding two or more generated photons. A sub-eMin cluster
-      // cannot be it, or an event could spend its merged slot on a cluster
-      // that is then cut away.
-      int best = -1;
-      for (size_t i = 0; i < n; i++) {
-         if (ml[i] < 2 || ee[i] < eMin) continue;
-         if (best < 0 || ee[i] > ee[(size_t)best]) best = (int)i;
+   // only the clusters the caller will actually use can be candidates
+   std::vector<size_t> ok;
+   for (size_t i = 0; i < n; i++) {
+      if (ee[i] < eMin)
+         rep.nBelowE += 1;
+      else
+         ok.push_back(i);
+   }
+   const int gs = (gun == kGamma) ? 0 : (gun == kPi0) ? 1 : 2;
+   rep.nEvt[gs] += 1;
+   if (ok.empty()) return;
+
+   // pi-: every cluster, because a hadron genuinely spreads over several and
+   // no subset of them is more "the hadron" than the rest
+   if (gun == kPiMinus) {
+      for (size_t j = 0; j < ok.size(); j++) {
+         label[(size_t)idx[ok[j]]] = 0;
+         rep.nClus[0] += 1;
+         rep.nKept[2] += 1;
       }
-      for (size_t i = 0; i < n; i++) {
-         const bool merged = ((int)i == best);
-         label[(size_t)idx[i]] = merged ? 2 : 1;
-         rep.nClus[merged ? 2 : 1] += 1;
-      }
-      rep.nEvt[1] += 1;
-      if (best >= 0) rep.nMerged += 1;
       return;
    }
 
-   rep.nNoGun += (Long64_t)n;  // label stays -1
+   // gamma: one photon, so one single-EM object - the leading cluster
+   if (gun == kGamma) {
+      size_t best = ok[0];
+      for (size_t j = 1; j < ok.size(); j++)
+         if (ee[ok[j]] > ee[best]) best = ok[j];
+      label[(size_t)idx[best]] = 1;
+      rep.nClus[1] += 1;
+      rep.nKept[0] += 1;
+      rep.nDrop[0] += (Long64_t)(ok.size() - 1);
+      return;
+   }
+
+   // pi0: merged, or resolved
+   int merged = -1;
+   for (size_t j = 0; j < ok.size(); j++) {
+      const size_t i = ok[j];
+      if (ml[i] < 2) continue;
+      if (merged < 0 || ee[i] > ee[(size_t)merged]) merged = (int)i;
+   }
+   if (merged >= 0) {
+      // both photons are inside this one cluster, so the event holds no
+      // single-EM object at all: nothing else from it is kept
+      label[(size_t)idx[(size_t)merged]] = 2;
+      rep.nClus[2] += 1;
+      rep.nKept[1] += 1;
+      rep.nDrop[1] += (Long64_t)(ok.size() - 1);
+      rep.nMerged += 1;
+      return;
+   }
+   // resolved: the two leading clusters are the two photons
+   size_t b1 = ok[0], b2 = 0;
+   bool haveB2 = false;
+   for (size_t j = 1; j < ok.size(); j++) {
+      const size_t i = ok[j];
+      if (ee[i] > ee[b1]) {
+         b2 = b1;
+         haveB2 = true;
+         b1 = i;
+      } else if (!haveB2 || ee[i] > ee[b2]) {
+         b2 = i;
+         haveB2 = true;
+      }
+   }
+   label[(size_t)idx[b1]] = 1;
+   rep.nClus[1] += 1;
+   rep.nKept[1] += 1;
+   if (haveB2) {
+      label[(size_t)idx[b2]] = 1;
+      rep.nClus[1] += 1;
+      rep.nKept[1] += 1;
+   }
+   rep.nDrop[1] += (Long64_t)(ok.size() - (haveB2 ? 2 : 1));
 }
 
 // One extra pass over the tree, on a private file handle. label[i] is the
@@ -201,16 +273,28 @@ inline Long64_t build(const char* infile, const char* treename,
 inline void printReport(const Report& rep) {
    const Long64_t tot = rep.nClus[0] + rep.nClus[1] + rep.nClus[2];
    const char* nm[3] = {"Hadron", "1EM", "MergedPi0"};
-   printf("\n  sample-based truth: every cluster of a recognised gun event has a class\n");
-   printf("    %-12s %10s %9s\n", "sample", "clusters", "share");
+   const char* gn[3] = {"gamma", "pi0", "pi-"};
+   printf("\n  sample-based truth (StFcsSampleLabel.h)\n");
+   printf("    %-12s %10s %8s\n", "sample", "clusters", "share");
    for (int k = 0; k < 3; k++)
-      printf("    %-12s %10lld %8.1f%%\n", nm[k], rep.nClus[k],
+      printf("    %-12s %10lld %7.1f%%\n", nm[k], rep.nClus[k],
              tot > 0 ? 100.0 * rep.nClus[k] / tot : 0.0);
-   printf("    events: %lld gamma, %lld pi0, %lld pi-\n", rep.nEvt[0], rep.nEvt[1], rep.nEvt[2]);
-   printf("    pi0 events with a merged cluster: %lld of %lld (%.1f%%); the rest resolved,\n"
-          "      with both of their clusters counted as 1EM\n",
+   printf("    %-12s %10lld\n", "TOTAL", tot);
+   printf("\n    %-8s %9s %9s %9s %8s   %s\n", "gun", "events", "kept", "dropped", "kept/evt",
+          "selection rule");
+   const char* how[3] = {"leading cluster only",
+                         "merged: that one alone; resolved: top 2", "every cluster"};
+   for (int g = 0; g < 3; g++)
+      printf("    %-8s %9lld %9lld %9lld %8.2f   %s\n", gn[g], rep.nEvt[g], rep.nKept[g],
+             rep.nDrop[g], rep.nEvt[g] > 0 ? (double)rep.nKept[g] / rep.nEvt[g] : 0.0, how[g]);
+   printf("    (a pi0 event feeds MergedPi0 or 1EM, never both; gamma feeds 1EM, pi- Hadron)\n");
+   printf("\n    pi0 events with a merged cluster: %lld of %lld (%.1f%%). The rest are\n"
+          "      resolved and give their two leading clusters to 1EM.\n",
           rep.nMerged, rep.nEvt[1],
           rep.nEvt[1] > 0 ? 100.0 * rep.nMerged / rep.nEvt[1] : 0.0);
+   printf("    dropped = above eMin but not selected by the ranking: %lld in all\n",
+          rep.nDrop[0] + rep.nDrop[1] + rep.nDrop[2]);
+   if (rep.nBelowE > 0) printf("    below eMin, never candidates: %lld\n", rep.nBelowE);
    if (rep.nNoGun > 0)
       printf("    %lld cluster(s) of an unrecognised gun, left without a class\n", rep.nNoGun);
 }

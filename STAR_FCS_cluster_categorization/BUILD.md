@@ -551,10 +551,44 @@ env LABELDEF=2 ./runTrainAll.sh 80GeV gamma.e80...root pi0.e80...root pi-.e80...
 | `2` | `FcsCat13smp_*` | `truthDef=3` | `eval<tag>_smp_*` |
 | `0` | `FcsCat13_*` | `truthDef=0` | `eval<tag>_mc_*` |
 
-Both macros print the sample breakdown before they start — clusters per sample,
-events per gun, and what fraction of π⁰ events produced a merged cluster, which
-is the number that says how much of the π⁰ sample the merged class actually
-covers at each energy.
+**The 1EM sample is trimmed by energy rank.** A γ gun makes one photon and a
+resolved π⁰ makes two, so one and two clusters are all the single-EM objects an
+event can hold; anything further is a fragment or a split-off, and training on
+it teaches the class that the junk around a shower is a photon. A **merged** π⁰
+event contributes *nothing* to 1EM — both photons are inside the merged cluster,
+so no single-EM object is left in that event. The hadronic sample is the one
+place every cluster is kept, because a hadron genuinely spreads over several and
+no subset of them is more "the hadron" than the rest. Clusters below `eMin` are
+never candidates, so the labels describe exactly what the caller will use.
+
+| gun | kept | dropped |
+|---|---|---|
+| γ | the leading cluster → 1EM | every other cluster |
+| π⁰, merged | the merged cluster alone → MergedPi0 | every other cluster |
+| π⁰, resolved | the two leading clusters → 1EM | any further cluster |
+| π⁻ | every cluster → Hadron | nothing |
+
+Both macros print the breakdown before they start — clusters per sample, and per
+gun the events, kept, dropped and kept/event, plus what fraction of π⁰ events
+produced a merged cluster at all. That last number says how much of the π⁰
+sample the merged class actually covers.
+
+`qaSampleLabel.C` draws it, over the training half:
+
+```csh
+root4star -b -q 'qaSampleLabel.C+("feat_pico_80GeV.root","qsmp_80GeV",0.5,0)'
+```
+
+| page | shows |
+|---|---|
+| 1 | ECal cluster energy per class, three on one log axis then one pad each — the spectrum each class is trained on |
+| 2 | the same three at unit area, so the shapes compare without the class sizes in the way |
+| 3 | per gun, kept against **dropped**, in cluster energy. A dropped curve that tracks the kept one in shape means the ranking is reaching real objects rather than fragments |
+| 4 | class share in each cluster-energy bin — the mix that sets purity bin by bin |
+| 5 | generated energy per class, for the same clusters |
+
+`runTrainAll.sh` runs it automatically when `LABELDEF=2`, writing
+`qsmp_<tag>.pdf`.
 
 Because the class of a cluster depends on the other clusters of its event, this
 definition costs one extra pass over the tree. It is read on a private file
