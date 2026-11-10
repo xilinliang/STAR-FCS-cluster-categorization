@@ -229,12 +229,16 @@ void qaSampleLabel(const char* infile = "feat_pico_all.root", const char* outNam
       double mx = 0;
       for (int c = 0; c < kNC; c++)
          if (hE[c]->GetMaximum() > mx) mx = hE[c]->GetMaximum();
+      // clones, or setting the overlay's title and range here would follow the
+      // originals onto the per-class pads below
       for (int c = 0; c < kNC; c++) {
-         hE[c]->SetMaximum(mx > 0 ? mx * 3 : 1);
-         hE[c]->SetMinimum(0.5);
-         hE[c]->SetTitle("cluster energy, all three classes;ECal cluster E [GeV];clusters");
-         hE[c]->Draw(c == 0 ? "hist" : "hist same");
-         lg->AddEntry(hE[c], Form("%s (%.0f)", kCShort[c], hE[c]->GetEntries()), "l");
+         TH1F* o = (TH1F*)hE[c]->Clone(Form("hEall_%s", kCShort[c]));
+         o->SetDirectory(0);
+         o->SetMaximum(mx > 0 ? mx * 3 : 1);
+         o->SetMinimum(0.5);
+         o->SetTitle("cluster energy, all three classes;ECal cluster E [GeV];clusters");
+         o->Draw(c == 0 ? "hist" : "hist same");
+         lg->AddEntry(o, Form("%s (%.0f)", kCShort[c], hE[c]->GetEntries()), "l");
       }
       lg->Draw();
    }
@@ -252,6 +256,7 @@ void qaSampleLabel(const char* infile = "feat_pico_all.root", const char* outNam
    // page 2: the same, unit area
    cv->Clear();
    cv->cd();
+   gPad->SetLogx(0);
    gPad->SetLogy(1);
    {
       TLegend* lg = new TLegend(0.55, 0.72, 0.93, 0.89);
@@ -284,14 +289,16 @@ void qaSampleLabel(const char* infile = "feat_pico_all.root", const char* outNam
       hKept[g]->SetMinimum(0.5);
       hKept[g]->Draw("hist");
       hDrop[g]->Draw("hist same");
-      TLegend* lg = new TLegend(0.42, 0.72, 0.93, 0.88);
+      TLegend* lg = new TLegend(0.50, 0.74, 0.90, 0.88);
       lg->SetBorderSize(0);
       lg->SetFillStyle(0);
-      lg->AddEntry(hKept[g], Form("kept  (%.0f)", hKept[g]->GetEntries()), "l");
-      lg->AddEntry(hDrop[g], Form("dropped by the ranking  (%.0f)", hDrop[g]->GetEntries()), "l");
+      lg->SetTextSize(0.035);
+      lg->AddEntry(hKept[g], Form("kept (%.0f)", hKept[g]->GetEntries()), "l");
+      lg->AddEntry(hDrop[g], Form("dropped (%.0f)", hDrop[g]->GetEntries()), "l");
       lg->Draw();
    }
    cv->cd(4);
+   gPad->SetLogy(0);
    tx.SetTextSize(0.035);
    tx.SetTextAlign(12);
    tx.DrawLatexNDC(0.06, 0.88, "What the ranking throws away");
@@ -308,6 +315,10 @@ void qaSampleLabel(const char* infile = "feat_pico_all.root", const char* outNam
    // page 4: class share per energy bin
    cv->Clear();
    cv->cd();
+   // page 2 set log y on the CANVAS, not on a subpad, so it is still set here.
+   // DrawFrame with ymin = 0 on a log axis renders an empty sliver - exactly
+   // the bug qaWeights.C page 4 had. Every linear pad states its scale.
+   gPad->SetLogy(0);
    gPad->SetGridy();
    {
       TH1F* fr = (TH1F*)gPad->DrawFrame(0, 0, eTop, 1.15,
@@ -343,12 +354,14 @@ void qaSampleLabel(const char* infile = "feat_pico_all.root", const char* outNam
          for (int c = 0; c < kNC; c++)
             if (hGen[c]->GetMaximum() > mx) mx = hGen[c]->GetMaximum();
          for (int c = 0; c < kNC; c++) {
-            hGen[c]->SetMaximum(mx > 0 ? mx * 3 : 1);
-            hGen[c]->SetMinimum(0.5);
-            hGen[c]->SetTitle("generated (gun) energy, all three classes;"
-                              "E_{gen} [GeV];clusters");
-            hGen[c]->Draw(c == 0 ? "hist" : "hist same");
-            lg->AddEntry(hGen[c], kCShort[c], "l");
+            TH1F* o = (TH1F*)hGen[c]->Clone(Form("hGenAll_%s", kCShort[c]));
+            o->SetDirectory(0);
+            o->SetMaximum(mx > 0 ? mx * 3 : 1);
+            o->SetMinimum(0.5);
+            o->SetTitle("generated (gun) energy, all three classes;"
+                        "E_{gen} [GeV];clusters");
+            o->Draw(c == 0 ? "hist" : "hist same");
+            lg->AddEntry(o, Form("%s (%.0f)", kCShort[c], hGen[c]->GetEntries()), "l");
          }
          lg->Draw();
       }
@@ -359,6 +372,7 @@ void qaSampleLabel(const char* infile = "feat_pico_all.root", const char* outNam
       }
    } else {
       cv->cd();
+      gPad->SetLogy(0);
       tx.SetTextAlign(22);
       tx.SetTextSize(0.035);
       tx.DrawLatexNDC(0.5, 0.5, "no genE branch - re-dump for the generated-energy page");
