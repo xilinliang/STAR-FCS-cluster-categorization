@@ -551,6 +551,35 @@ env LABELDEF=2 ./runTrainAll.sh 80GeV gamma.e80...root pi0.e80...root pi-.e80...
 | `2` | `FcsCat13smp_*` | `truthDef=3` | `eval<tag>_smp_*` |
 | `0` | `FcsCat13_*` | `truthDef=0` | `eval<tag>_mc_*` |
 
+**The merged-π⁰ split needs a containment cut, not just `mcLabel >= 2`.**
+`mcLabel >= 2` means two generated photons project within the 11 cm match
+radius of the cluster — but when the pair is 1–2 towers apart it makes *two*
+clusters, and each photon still lands within 11 cm of *both* centroids, so both
+clusters carry `mcLabel >= 2` while each holds one photon. Measured on the
+1–80 GeV sample (`qaSampleLabel.C` page 6):
+
+| MergedPi0 slice | peak separation | peak containment | verdict |
+|---|---|---|---|
+| > 30 GeV | ~0.5 towers | ~0.95 | genuinely merged |
+| 10–30 GeV | ~1.3 towers | 0.6–0.8, broad | partly contaminated |
+| < 10 GeV | ~2.0 towers | ~0.1–0.3 | **single photons of resolved pairs** |
+
+Integrated over all energies the containment peaks at 0.95 and looks fine —
+only the slicing exposes it, because the high-energy clusters dominate. So a
+merged candidate must also **contain** its π⁰: `E_clu/E_gen > kMinCont`
+(0.8, in `StFcsSampleLabel.h`). Containment tests the thing that matters — is
+both photons' energy *here* — and unlike a separation cut it does not depend on
+the match radius that caused the problem. An event whose only `mcLabel >= 2`
+clusters fail it is simply **resolved**, and its two leading clusters go to 1EM,
+which is what they are. The printed report counts those events, so the size of
+the effect is never hidden. Set `kMinCont` to 0 to recover the old behaviour.
+
+This contaminates `truthDef=1` *more* than the sample definition, not less:
+there **both** clusters of such a pair are labelled merged π⁰, which is the 1.19
+merged clusters per π⁰ event seen in the `ov80GeV` log. Every merged-π⁰ number
+quoted before this fix — the 0.80 efficiency in the table above included — was
+measured against a class containing resolved pairs.
+
 **The 1EM sample is trimmed by energy rank.** A γ gun makes one photon and a
 resolved π⁰ makes two, so one and two clusters are all the single-EM objects an
 event can hold; anything further is a fragment or a split-off, and training on

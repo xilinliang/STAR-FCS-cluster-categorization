@@ -20,7 +20,8 @@
 //   gamma event (GEANT3 pid 1)  the HIGHEST-ENERGY cluster -> 1EM  (class 1)
 //                               every other cluster        -> dropped
 //   pi- event   (pid 9)         every cluster              -> Hadron (class 0)
-//   pi0 event   (pid 7)         if the event has a cluster with mcLabel >= 2,
+//   pi0 event   (pid 7)         if the event has a cluster with mcLabel >= 2
+//                               AND E_clu/E_gen > kMinCont,
 //                                 the highest-energy such  -> MergedPi0  (2)
 //                                 and every OTHER cluster  -> dropped
 //                               otherwise (resolved):
@@ -63,12 +64,31 @@
 // resolved pi0s, which are the same object to a shower-shape classifier but
 // not to an analysis. Read it beside truthDef=1, not instead of it.
 //
-// THE PI0 SPLIT uses mcLabel >= 2 - two or more GENERATED photons projecting
-// within the feature maker's match radius (setMcMatchRadius, 11 cm, about two
-// ECal towers). That radius puts a ceiling on the separation a pair can have
-// and still count as merged: roughly four tower widths for a symmetric pair,
-// nearer two for a very asymmetric one. Beyond it the event is called resolved
-// and both of its clusters go to 1EM.
+// THE PI0 SPLIT needs TWO conditions, and the second one matters.
+//
+// mcLabel >= 2 alone is not enough. It means two or more GENERATED photons
+// project within the feature maker's match radius (setMcMatchRadius, 11 cm,
+// about two ECal towers) of this cluster - but when the pair is 1-2 towers
+// apart it makes TWO clusters, and each photon still lands within 11 cm of
+// BOTH centroids. Both clusters then carry mcLabel >= 2 although each holds
+// one photon. Measured on the 1-80 GeV sample (qaSampleLabel.C page 6), the
+// MergedPi0 clusters below 10 GeV peaked at a separation of ~2 towers and a
+// containment of ~0.2: single photons of resolved pairs, every one of them.
+//
+// So a merged candidate must also CONTAIN its pi0: E_clu/E_gen > kMinCont. A
+// cluster holding both photons keeps nearly all of the pi0 (the > 30 GeV slice
+// peaked at 0.95, the same place single photons peak), while one lobe of a
+// resolved pair keeps a fraction. Containment tests the thing that matters -
+// is both photons' energy HERE - and, unlike a separation cut, does not
+// depend on the match radius that caused the problem in the first place.
+//
+// An event whose only mcLabel >= 2 clusters fail the containment cut is simply
+// RESOLVED, and its two leading clusters go to 1EM, which is what they are.
+//
+// The cost: a genuinely merged pi0 that leaks badly - at the detector edge,
+// say - fails the cut too and is counted as resolved. That is the conservative
+// direction for a truth definition, and the Report says how many were
+// rejected so the size of the effect is never hidden.
 //
 // MECHANICS. The class of a cluster depends on the OTHER clusters of its
 // event, so it cannot be decided in the single pass that reads the features.
@@ -101,6 +121,13 @@ const int kGamma = 1;
 const int kPi0 = 7;
 const int kPiMinus = 9;
 
+// A merged candidate must keep at least this fraction of the pi0's generated
+// energy. Chosen from the containment distributions in qaSampleLabel.C page 6:
+// single photons and genuinely merged pi0 both peak at ~0.95, while the
+// mislabelled low-energy population sits below 0.5. Set it to 0 to disable the
+// requirement and recover the mcLabel-only behaviour.
+const float kMinCont = 0.8f;
+
 // What the pass found, for the printed summary.
 struct Report {
    Long64_t nClus[3];  // clusters per sample: 0 Hadron, 1 1EM, 2 MergedPi0
@@ -108,9 +135,11 @@ struct Report {
    Long64_t nKept[3];  // clusters given a class, per gun (pi0 feeds two samples)
    Long64_t nDrop[3];  // clusters above eMin left out by the ranking, per gun
    Long64_t nMerged;   // pi0 events that produced a merged cluster
+   Long64_t nLowCont;  // pi0 events whose only mcLabel>=2 clusters failed the
+                       // containment cut - resolved pairs matched twice
    Long64_t nBelowE;   // clusters below eMin, never candidates
    Long64_t nNoGun;    // clusters of an unrecognised gun, left without a class
-   Report() : nMerged(0), nBelowE(0), nNoGun(0) {
+   Report() : nMerged(0), nLowCont(0), nBelowE(0), nNoGun(0) {
       for (int i = 0; i < 3; i++) nClus[i] = nEvt[i] = nKept[i] = nDrop[i] = 0;
    }
 };
@@ -118,7 +147,7 @@ struct Report {
 // Close out one event: label every cluster it collected. A free function and
 // not a lambda, because ROOT 5 builds this as C++98.
 inline void finishEvent(int gun, const std::vector<Long64_t>& idx, const std::vector<float>& ee,
-                        const std::vector<int>& ml, float eMin,
+                        const std::vector<int>& ml, float eMin, float genE, float minCont,
                         std::vector<signed char>& label, Report& rep) {
    const size_t n = idx.size();
    if (n == 0) return;
@@ -162,13 +191,18 @@ inline void finishEvent(int gun, const std::vector<Long64_t>& idx, const std::ve
       return;
    }
 
-   // pi0: merged, or resolved
+   // pi0: merged, or resolved. mcLabel >= 2 says two photons were MATCHED to
+   // this cluster; the containment says they are actually IN it.
    int merged = -1;
+   bool sawCand = false;
    for (size_t j = 0; j < ok.size(); j++) {
       const size_t i = ok[j];
       if (ml[i] < 2) continue;
+      sawCand = true;
+      if (minCont > 0 && !(genE > 0 && ee[i] / genE > minCont)) continue;
       if (merged < 0 || ee[i] > ee[(size_t)merged]) merged = (int)i;
    }
+   if (merged < 0 && sawCand) rep.nLowCont += 1;
    if (merged >= 0) {
       // both photons are inside this one cluster, so the event holds no
       // single-EM object at all: nothing else from it is kept
@@ -209,7 +243,8 @@ inline void finishEvent(int gun, const std::vector<Long64_t>& idx, const std::ve
 // the file cannot support the definition (unreadable, no tree, or no genPid /
 // mcLabel branch).
 inline Long64_t build(const char* infile, const char* treename,
-                      std::vector<signed char>& label, float eMin, Report* out = 0) {
+                      std::vector<signed char>& label, float eMin, Report* out = 0,
+                      float minCont = kMinCont) {
    label.clear();
    TFile* f = TFile::Open(infile, "READ");
    if (!f || f->IsZombie()) {
@@ -223,16 +258,26 @@ inline Long64_t build(const char* infile, const char* treename,
    }
 
    Int_t run = 0, event = 0, genPid = 0, mcLabel = -1;
-   Float_t e = 0;
+   Float_t e = 0, genE = -1;
+   // without genE the containment cannot be tested; fall back to mcLabel alone
+   // rather than silently classing every pi0 event as resolved
+   const bool haveGen = (t->GetBranch("genE") != 0);
+   if (!haveGen && minCont > 0) {
+      printf("StFcsSampleLabel: %s has no genE, so the merged-pi0 containment cut\n"
+             "  is off - the merged class will contain resolved pairs matched twice\n",
+             infile);
+      minCont = 0;
+   }
    // only the five branches the definition needs, so the pass is cheap
    t->SetBranchStatus("*", false);
-   const char* want[5] = {"run", "event", "genPid", "mcLabel", "e"};
-   for (int b = 0; b < 5; b++) t->SetBranchStatus(want[b], true);
+   const char* want[6] = {"run", "event", "genPid", "mcLabel", "e", "genE"};
+   for (int b = 0; b < (haveGen ? 6 : 5); b++) t->SetBranchStatus(want[b], true);
    t->SetBranchAddress("run", &run);
    t->SetBranchAddress("event", &event);
    t->SetBranchAddress("genPid", &genPid);
    t->SetBranchAddress("mcLabel", &mcLabel);
    t->SetBranchAddress("e", &e);
+   if (haveGen) t->SetBranchAddress("genE", &genE);
 
    const Long64_t n = t->GetEntries();
    label.assign((size_t)n, (signed char)-1);
@@ -242,13 +287,14 @@ inline Long64_t build(const char* infile, const char* treename,
    std::vector<float> ee;
    std::vector<int> ml;
    int gun = 0;
+   float curGenE = -1;
    Int_t curRun = 0, curEvt = 0;
    bool have = false;
 
    for (Long64_t i = 0; i < n; i++) {
       t->GetEntry(i);
       if (!have || run != curRun || event != curEvt) {
-         finishEvent(gun, idx, ee, ml, eMin, label, rep);
+         finishEvent(gun, idx, ee, ml, eMin, curGenE, minCont, label, rep);
          idx.clear();
          ee.clear();
          ml.clear();
@@ -258,12 +304,13 @@ inline Long64_t build(const char* infile, const char* treename,
          // the gun of an event is the gun of its first cluster; a single-
          // particle sample has exactly one per event by construction
          gun = (genPid == kGamma || genPid == kPi0 || genPid == kPiMinus) ? genPid : 0;
+         curGenE = genE;  // an event quantity, copied onto every cluster
       }
       idx.push_back(i);
       ee.push_back(e);
       ml.push_back(mcLabel);
    }
-   finishEvent(gun, idx, ee, ml, eMin, label, rep);
+   finishEvent(gun, idx, ee, ml, eMin, curGenE, minCont, label, rep);
 
    delete f;  // takes the tree with it; the labels are already copied out
    if (out) *out = rep;
@@ -292,6 +339,9 @@ inline void printReport(const Report& rep) {
           "      resolved and give their two leading clusters to 1EM.\n",
           rep.nMerged, rep.nEvt[1],
           rep.nEvt[1] > 0 ? 100.0 * rep.nMerged / rep.nEvt[1] : 0.0);
+   printf("    pi0 events whose mcLabel>=2 cluster(s) FAILED the containment cut and\n"
+          "      were therefore counted as resolved: %lld - these are pairs 1-2 towers\n"
+          "      apart that the 11 cm match radius labelled twice\n", rep.nLowCont);
    printf("    dropped = above eMin but not selected by the ranking: %lld in all\n",
           rep.nDrop[0] + rep.nDrop[1] + rep.nDrop[2]);
    if (rep.nBelowE > 0) printf("    below eMin, never candidates: %lld\n", rep.nBelowE);
