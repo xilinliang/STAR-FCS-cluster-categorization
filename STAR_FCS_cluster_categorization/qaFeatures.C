@@ -14,6 +14,11 @@
 // and mask, exactly as trainTMVA.C does. So what you see here is what TMVA is
 // fed, not a separate re-implementation.
 //
+// The per-CLASS page (page 2) splits the cluster energy by the truth that
+// will be TRAINED on, chosen with labelDef: 0 mcLabel, 1 the gun particle
+// cleaned, 2 the sample definition of StFcsSampleLabel.h. That is a different
+// split from the per-GUN pages, which go by which gun fired the event.
+//
 // Output
 //   <out>.pdf
 //     page 1        cluster overview: energy, generated energy, centroid maps
@@ -81,6 +86,7 @@
 #include "TTree.h"
 
 #include "StRoot/StFcsMLCategoryMaker/StFcsClusterFeatures.h"
+#include "StRoot/StFcsMLCategoryMaker/StFcsSampleLabel.h"
 #include "StRoot/StFcsMLCategoryMaker/StFcsTrainTestSplit.h"
 
 namespace {
@@ -88,6 +94,10 @@ namespace {
 // class slots: 0 other, 1 onePhoton, 2 twoPhoton, 3 no truth
 const int kNCls = 4;
 const char* kQaClsName[kNCls] = {"other", "onePhoton", "twoPhoton", "no truth"};
+// the same three in the language of the training classes, for the per-class page
+const char* kQaTrainName[3] = {"Hadron (other)", "Single EM (onePhoton)",
+                               "Merged #pi^{0} (twoPhoton)"};
+const char* kQaTrainShort[3] = {"Hadron", "SingleEM", "MergedPi0"};
 const int kQaClsColor[kNCls] = {kGray + 2, kAzure + 1, kOrange + 7, kMagenta + 1};
 // gun particles: gamma, pi0, pi-
 const int kQaGunColor[3] = {kAzure + 1, kOrange + 7, kGray + 2};
@@ -174,7 +184,9 @@ void qaFeatures(const char* infile = "feat_pico.root",
                 const char* outName = "",    // default: qa_<input file name without .root>
                 float eMin = 0.5,            // same cut as trainTMVA.C / evalCategory.C
                 float eMax = 0,              // upper end of every energy axis; 0 = automatic
-                const char* treename = "clusters") {
+                const char* treename = "clusters",
+                int labelDef = 0) {          // which truth splits the per-CLASS page:
+                                             //   0 mcLabel, 1 gun cleaned, 2 sample-based
    using namespace StFcsClusterFeatures;
    gROOT->SetBatch(kTRUE);
    gStyle->SetOptStat(0);
@@ -347,6 +359,17 @@ void qaFeatures(const char* infile = "feat_pico.root",
    TH1F* hNNb = new TH1F("hNNb", "neighbouring clusters;nNeighbor;clusters", 6, -0.5, 5.5);
    TH1F* hCat = new TH1F("hCat", "FCS Cluster category;category;clusters", 3, -0.5, 2.5);
    TH1F* hCls = new TH1F("hCls", "true class (mcLabel);;clusters", kNCls, -0.5, kNCls - 0.5);
+   // ECal cluster energy of the clusters that go into each TRAINING class
+   TH1F* hEcls[3];
+   for (int k = 0; k < 3; k++) {
+      hEcls[k] = new TH1F(Form("hEcls_%s", kQaTrainShort[k]),
+                          Form("cluster energy, %s;ECal cluster E [GeV];clusters",
+                               kQaTrainName[k]),
+                          nEbin, 0, eTop);
+      hEcls[k]->SetLineColor(kQaClsColor[k]);
+      hEcls[k]->SetLineWidth(3);
+      hEcls[k]->SetStats(0);
+   }
    TH2F* hSigE = new TH2F("hSigE", "sigmaMax vs E, nTowers #geq 5;E [GeV];#sigma_{max} [cells]", nEbin, 0, eTop, 60, 0, 3);
 
    // ---------------------------------------------------------- event loop
@@ -357,6 +380,24 @@ void qaFeatures(const char* infile = "feat_pico.root",
    const Long64_t n = in->GetEntries();
    int prevRun = -1, prevEvent = -1;
    bool firstEntry = true;
+   // The per-CLASS page splits by the truth that will be TRAINED on, which is
+   // not the gun particle: a resolved pi0 makes two single-photon clusters, so
+   // the pi0 gun feeds two different classes. labelDef picks which definition.
+   if (labelDef < 0 || labelDef > 2) labelDef = 0;
+   if (labelDef > 0 && !havePid) {
+      printf("labelDef=%d needs genPid, which %s does not have - using mcLabel\n", labelDef, infile);
+      labelDef = 0;
+   }
+   std::vector<signed char> smpLab;
+   if (labelDef == 2 &&
+       StFcsSampleLabel::build(infile, treename, smpLab, eMin) < 0) {
+      printf("labelDef=2 needs genPid and mcLabel in %s - using mcLabel\n", infile);
+      labelDef = 0;
+   }
+   const char* labTxt[3] = {"mcLabel - the photons inside each cluster",
+                            "gun particle, cleaned (resolved pi0 photons dropped)",
+                            "input sample (StFcsSampleLabel.h)"};
+
    for (Long64_t i = 0; i < n; i++) {
       in->GetEntry(i);
       nRead++;
@@ -424,6 +465,11 @@ void qaFeatures(const char* infile = "feat_pico.root",
       if (!ok) continue;
 
       int t = StFcsTrainTestSplit::trainingLabel(mcLabel, truthNPhoton, truthPurity, 0.8f);
+      if (labelDef == 1)
+         t = (t >= 0) ? StFcsTrainTestSplit::sampleLabel(genPid, mcLabel) : -1;
+      else if (labelDef == 2)
+         t = (i < (Long64_t)smpLab.size()) ? (int)smpLab[(size_t)i] : -1;
+      if (t >= 0 && t < 3) hEcls[t]->Fill(e);
       if (t < 0) t = 3;
       cls.push_back(t);
       eClu.push_back(e);
@@ -503,6 +549,58 @@ void qaFeatures(const char* infile = "feat_pico.root",
       nt.DrawLatexNDC(0.25, 0.5, "no genE branch in this file");
    }
    cv->Print(pdf + "(");
+
+   // ECal cluster energy of the clusters that go into each TRAINING class:
+   // Hadron, Single EM, Merged pi0. Read it against the per-GUN page further
+   // on - the two are NOT the same split. A resolved pi0 makes two
+   // single-photon clusters, so the pi0 gun feeds the Single EM class as well
+   // as the merged one, and which truth does the splitting is labelDef.
+   cv->Clear();
+   cv->Divide(2, 2);
+   cv->cd(1);
+   gPad->SetLogy(1);
+   gPad->SetLeftMargin(0.13);
+   {
+      double mx = 0;
+      for (int k = 0; k < 3; k++)
+         if (hEcls[k]->GetMaximum() > mx) mx = hEcls[k]->GetMaximum();
+      TLegend* lg = new TLegend(0.42, 0.68, 0.93, 0.88);
+      lg->SetBorderSize(0);
+      lg->SetFillStyle(0);
+      for (int k = 0; k < 3; k++) {
+         // clones, or the overlay's title and range follow the originals
+         // onto the single-class pads below
+         TH1F* o = (TH1F*)hEcls[k]->Clone(Form("hEclsAll_%s", kQaTrainShort[k]));
+         o->SetDirectory(0);
+         o->SetMaximum(mx > 0 ? mx * 3 : 1);
+         o->SetMinimum(0.5);
+         o->SetTitle("cluster energy of the TRAINING classes;ECal cluster E [GeV];clusters");
+         o->Draw(k == 0 ? "hist" : "hist same");
+         lg->AddEntry(o, Form("%s (%.0f)", kQaTrainShort[k], hEcls[k]->GetEntries()), "l");
+         keep.push_back(o);
+      }
+      lg->Draw();
+   }
+   for (int k = 0; k < 3; k++) {
+      cv->cd(k + 2);
+      gPad->SetLogy(1);
+      gPad->SetLeftMargin(0.13);
+      double mx = hEcls[k]->GetMaximum();
+      hEcls[k]->SetMaximum(mx > 0 ? mx * 3 : 1);
+      hEcls[k]->SetMinimum(0.5);
+      hEcls[k]->Draw("hist");
+      keep.push_back(hEcls[k]);
+   }
+   cv->cd();
+   {
+      TLatex lt;
+      lt.SetNDC();
+      lt.SetTextSize(0.021);
+      lt.DrawLatexNDC(0.01, 0.985,
+                      Form("truth for this page: %s", labTxt[labelDef]));
+   }
+   cv->Print(pdf);
+
 
    // ---- generated energy per gun particle, per cluster and per event ------
    //

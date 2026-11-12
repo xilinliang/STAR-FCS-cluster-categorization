@@ -596,6 +596,26 @@ handle rather than the caller's tree: hooking branch addresses onto a tree the
 caller is already reading, then resetting them, silently detaches every feature
 branch, and the resulting garbage does not look like an error.
 
+**Cluster energy of the three TRAINING classes** is page 2 of `qaFeatures.C`:
+the three overlaid on one log axis, then one pad each for Hadron, Single EM and
+Merged π⁰. It is deliberately a different split from the per-gun pages further
+on — a resolved π⁰ makes two single-photon clusters, so the π⁰ gun feeds Single
+EM as well as Merged π⁰, and the gun is not the class. A sixth argument chooses
+which truth does the splitting:
+
+```csh
+# mcLabel (default), the gun particle cleaned, the sample definition
+root4star -b -q 'qaFeatures.C+("feat_pico_80GeV.root","qa_80GeV",0.5,0,"clusters",0)'
+root4star -b -q 'qaFeatures.C+("feat_pico_80GeV.root","qa_80GeV_gen",0.5,0,"clusters",1)'
+root4star -b -q 'qaFeatures.C+("feat_pico_80GeV.root","qa_80GeV_smp",0.5,0,"clusters",2)'
+```
+
+`runTrainAll.sh` passes its own `LABELDEF` through, so the page always shows the
+classes that run is about to train on. `labelDef=0` needs no `genPid`, so the
+page is drawn even for a feature file without the generator branches;
+`qaSampleLabel.C` covers the same ground in more detail for `labelDef=2`,
+including what the ranking dropped.
+
 **Per generated particle.** Every feature file now carries `genPid`, `genE` and
 `nGen`: the GEANT id and energy of the generated (gun) particle of the event — for
 a single-particle sample, which sample the cluster came from. That is lost

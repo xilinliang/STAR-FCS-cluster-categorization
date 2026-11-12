@@ -161,7 +161,8 @@ fi
 # ---- 2. QA what is about to be trained on -----------------------------------
 # The merged file has many gun energies, so the energy axis comes from the data.
 echo "== QA of the merged sample"
-root4star -b -q "qaFeatures.C+(\"$feat\",\"qa_${tag}\",$emin)" 2>&1 | tee "qa_${tag}.log"
+root4star -b -q "qaFeatures.C+(\"$feat\",\"qa_${tag}\",$emin,0,\"clusters\",$lbl)" \
+   2>&1 | tee "qa_${tag}.log"
 
 # labelDef=2 ranks the clusters of an event and keeps only some of them, so QA
 # what actually reaches each class before training on it.
