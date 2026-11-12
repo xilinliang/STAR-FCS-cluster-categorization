@@ -32,6 +32,13 @@
 //     page 4  class share in each cluster-energy bin: the class mix the model
 //             sees against energy, which is what sets purity bin by bin
 //     page 5  generated (gun) energy per class, for the same clusters
+//     page 6  IS THE MERGED CLASS REALLY MERGED? Containment E_clu/E_gen per
+//             class, then containment and photon separation for the MergedPi0
+//             class alone, sliced in cluster energy. A cluster holding BOTH
+//             photons must carry nearly the whole pi0, so its containment sits
+//             near the single-photon value and its separation is small. A
+//             "merged" cluster with containment ~0.2 is one lobe of a resolved
+//             pair that the 11 cm match radius labelled twice - see BUILD.md
 //   <out>.root  every histogram
 //
 // Only the TRAINING half is used by default (sample=0), because that is what
@@ -117,6 +124,7 @@ void qaSampleLabel(const char* infile = "feat_pico_all.root", const char* outNam
 
    Float_t e = 0, genE = -1;
    Int_t run = 0, event = 0, genPid = 0, mcLabel = -1;
+   Float_t mcSepCell = -1;
    in->SetBranchAddress("run", &run);
    in->SetBranchAddress("event", &event);
    in->SetBranchAddress("e", &e);
@@ -124,6 +132,8 @@ void qaSampleLabel(const char* infile = "feat_pico_all.root", const char* outNam
    if (haveGen) in->SetBranchAddress("genE", &genE);
    if (in->GetBranch("genPid")) in->SetBranchAddress("genPid", &genPid);
    if (in->GetBranch("mcLabel")) in->SetBranchAddress("mcLabel", &mcLabel);
+   const bool haveSep = (in->GetBranch("mcSepCell") != 0);
+   if (haveSep) in->SetBranchAddress("mcSepCell", &mcSepCell);
 
    double eTop = eMax;
    if (eTop <= 0) {
@@ -162,6 +172,32 @@ void qaSampleLabel(const char* infile = "feat_pico_all.root", const char* outNam
       style(hKept[g], kGColor[g], 3, 1);
       style(hDrop[g], kGColor[g], 2, 2);
    }
+   // --- the merged-class diagnostic ---------------------------------------
+   // containment per class, and for MergedPi0 the containment and the photon
+   // separation sliced in cluster energy
+   const int kNS = 3;
+   const double kSlice[kNS + 1] = {0, 10, 30, 1e9};
+   const char* kSliceTxt[kNS] = {"E_{clu} < 10 GeV", "10 - 30 GeV", "> 30 GeV"};
+   const int kSliceCol[kNS] = {kRed + 1, kGreen + 2, kAzure + 2};
+   TH1F* hCont[kNC];
+   TH1F* hContM[kNS];
+   TH1F* hSepM[kNS];
+   for (int c = 0; c < kNC; c++) {
+      hCont[c] = new TH1F(Form("hCont_%s", kCShort[c]),
+                          "containment;E_{clu} / E_{gen};unit area", 60, 0, 1.2);
+      style(hCont[c], kCColor[c]);
+   }
+   for (int k = 0; k < kNS; k++) {
+      hContM[k] = new TH1F(Form("hContM_%d", k),
+                           "MergedPi0 containment;E_{clu} / E_{gen};unit area", 60, 0, 1.2);
+      hSepM[k] = new TH1F(Form("hSepM_%d", k),
+                          "MergedPi0 photon separation;separation [towers];unit area", 50, 0, 5);
+      style(hContM[k], kSliceCol[k]);
+      style(hSepM[k], kSliceCol[k]);
+   }
+   double sumC[kNS], sumS[kNS], nSl[kNS];
+   for (int k = 0; k < kNS; k++) sumC[k] = sumS[k] = nSl[k] = 0;
+
    // class share per energy bin
    TH1F* hShare[kNC];
    for (int c = 0; c < kNC; c++) {
@@ -191,7 +227,21 @@ void qaSampleLabel(const char* infile = "feat_pico_all.root", const char* outNam
          hE[c]->Fill(e);
          hEn[c]->Fill(e);
          if (haveGen) hGen[c]->Fill(genE);
+         if (haveGen && genE > 0) hCont[c]->Fill(e / genE);
          if (g >= 0) hKept[g]->Fill(e);
+         if (c == 2) {  // MergedPi0, sliced in cluster energy
+            int k = 0;
+            while (k < kNS - 1 && e >= kSlice[k + 1]) k++;
+            if (haveGen && genE > 0) {
+               hContM[k]->Fill(e / genE);
+               sumC[k] += e / genE;
+            }
+            if (haveSep && mcSepCell >= 0) {
+               hSepM[k]->Fill(mcSepCell);
+               sumS[k] += mcSepCell;
+            }
+            nSl[k] += 1;
+         }
          nUsed++;
       } else {
          if (g >= 0) hDrop[g]->Fill(e);
@@ -208,8 +258,25 @@ void qaSampleLabel(const char* infile = "feat_pico_all.root", const char* outNam
       for (int c = 0; c < kNC; c++)
          hShare[c]->SetBinContent(b, sum > 0 ? hE[c]->GetBinContent(b) / sum : 0.0);
    }
-   for (int c = 0; c < kNC; c++)
+   for (int c = 0; c < kNC; c++) {
       if (hEn[c]->Integral() > 0) hEn[c]->Scale(1.0 / hEn[c]->Integral());
+      if (hCont[c]->Integral() > 0) hCont[c]->Scale(1.0 / hCont[c]->Integral());
+   }
+   for (int k = 0; k < kNS; k++) {
+      if (hContM[k]->Integral() > 0) hContM[k]->Scale(1.0 / hContM[k]->Integral());
+      if (hSepM[k]->Integral() > 0) hSepM[k]->Scale(1.0 / hSepM[k]->Integral());
+   }
+   printf("\n  IS THE MERGED CLASS REALLY MERGED?\n");
+   printf("    a cluster holding BOTH photons carries nearly the whole pi0, so its\n"
+          "    containment should sit near the single-photon value, with a small separation\n");
+   printf("    %-16s %10s %14s %14s\n", "MergedPi0 slice", "clusters", "<E_clu/E_gen>",
+          "<separation>");
+   for (int k = 0; k < kNS; k++)
+      printf("    %-16s %10.0f %14.3f %14.2f\n", kSliceTxt[k], nSl[k],
+             nSl[k] > 0 ? sumC[k] / nSl[k] : 0.0, nSl[k] > 0 ? sumS[k] / nSl[k] : 0.0);
+   printf("    (compare with the 1EM containment on page 6 - a merged cluster that\n"
+          "     contains far LESS of its pi0 than a photon does of its gamma is one lobe\n"
+          "     of a resolved pair, mislabelled by the 11 cm match radius)\n");
 
    // ------------------------------------------------------------ the pages
    const TString pdf = TString(outName) + ".pdf";
@@ -377,6 +444,89 @@ void qaSampleLabel(const char* infile = "feat_pico_all.root", const char* outNam
       tx.SetTextSize(0.035);
       tx.DrawLatexNDC(0.5, 0.5, "no genE branch - re-dump for the generated-energy page");
    }
+   cv->Print(pdf);
+
+   // page 6: is the merged class really merged?
+   cv->Clear();
+   cv->Divide(2, 2);
+
+   cv->cd(1);
+   gPad->SetLogy(0);
+   {
+      double mx = 0;
+      for (int c = 0; c < kNC; c++)
+         if (hCont[c]->GetMaximum() > mx) mx = hCont[c]->GetMaximum();
+      TLegend* lg = new TLegend(0.15, 0.70, 0.55, 0.88);
+      lg->SetBorderSize(0);
+      lg->SetFillStyle(0);
+      for (int c = 0; c < kNC; c++) {
+         hCont[c]->SetMaximum(mx > 0 ? mx * 1.3 : 1);
+         hCont[c]->SetTitle("containment, per class;E_{clu} / E_{gen};unit area");
+         hCont[c]->Draw(c == 0 ? "hist" : "hist same");
+         lg->AddEntry(hCont[c], kCShort[c], "l");
+      }
+      lg->Draw();
+   }
+
+   cv->cd(2);
+   gPad->SetLogy(0);
+   {
+      double mx = 0;
+      for (int k = 0; k < kNS; k++)
+         if (hContM[k]->GetMaximum() > mx) mx = hContM[k]->GetMaximum();
+      TLegend* lg = new TLegend(0.15, 0.68, 0.55, 0.88);
+      lg->SetBorderSize(0);
+      lg->SetFillStyle(0);
+      for (int k = 0; k < kNS; k++) {
+         hContM[k]->SetMaximum(mx > 0 ? mx * 1.3 : 1);
+         hContM[k]->SetTitle("MergedPi0 containment, by cluster energy;"
+                             "E_{clu} / E_{gen};unit area");
+         hContM[k]->Draw(k == 0 ? "hist" : "hist same");
+         lg->AddEntry(hContM[k], kSliceTxt[k], "l");
+      }
+      lg->Draw();
+   }
+
+   cv->cd(3);
+   gPad->SetLogy(0);
+   {
+      double mx = 0;
+      for (int k = 0; k < kNS; k++)
+         if (hSepM[k]->GetMaximum() > mx) mx = hSepM[k]->GetMaximum();
+      TLegend* lg = new TLegend(0.50, 0.68, 0.90, 0.88);
+      lg->SetBorderSize(0);
+      lg->SetFillStyle(0);
+      for (int k = 0; k < kNS; k++) {
+         hSepM[k]->SetMaximum(mx > 0 ? mx * 1.3 : 1);
+         hSepM[k]->SetTitle("MergedPi0 photon separation, by cluster energy;"
+                            "separation of the two photons [towers];unit area");
+         hSepM[k]->Draw(k == 0 ? "hist" : "hist same");
+         lg->AddEntry(hSepM[k], kSliceTxt[k], "l");
+      }
+      lg->Draw();
+      if (!haveSep) {
+         tx.SetTextAlign(22);
+         tx.SetTextSize(0.04);
+         tx.DrawLatexNDC(0.5, 0.5, "no mcSepCell branch");
+      }
+   }
+
+   cv->cd(4);
+   gPad->SetLogy(0);
+   tx.SetTextAlign(12);
+   tx.SetTextSize(0.040);
+   tx.DrawLatexNDC(0.05, 0.90, "Is the merged class really merged?");
+   tx.SetTextSize(0.030);
+   tx.DrawLatexNDC(0.05, 0.80, "A cluster holding BOTH photons carries nearly");
+   tx.DrawLatexNDC(0.05, 0.74, "the whole pi0, so its containment should sit");
+   tx.DrawLatexNDC(0.05, 0.68, "near the 1EM value and its separation be small.");
+   tx.DrawLatexNDC(0.05, 0.56, "A MergedPi0 slice whose containment peaks far");
+   tx.DrawLatexNDC(0.05, 0.50, "BELOW the 1EM peak is one lobe of a RESOLVED");
+   tx.DrawLatexNDC(0.05, 0.44, "pair: the 11 cm match radius put both photons");
+   tx.DrawLatexNDC(0.05, 0.38, "inside 2 towers of each centroid, so both");
+   tx.DrawLatexNDC(0.05, 0.32, "clusters got mcLabel >= 2.");
+   tx.DrawLatexNDC(0.05, 0.20, "Expect that in the low cluster-energy slice,");
+   tx.DrawLatexNDC(0.05, 0.14, "where a pi0 opens up and cannot truly merge.");
    cv->Print(pdf + ")");
 
    // ------------------------------------------------------------ the root file
@@ -390,6 +540,11 @@ void qaSampleLabel(const char* infile = "feat_pico_all.root", const char* outNam
    for (int g = 0; g < kNG; g++) {
       hKept[g]->Write();
       hDrop[g]->Write();
+   }
+   for (int c = 0; c < kNC; c++) hCont[c]->Write();
+   for (int k = 0; k < kNS; k++) {
+      hContM[k]->Write();
+      hSepM[k]->Write();
    }
    fout->Close();
 
