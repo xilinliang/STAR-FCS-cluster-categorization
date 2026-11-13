@@ -1793,9 +1793,9 @@ Three things are hard-coded and were extended for the 80 GeV sample:
 
 | what | file | before | after |
 |---|---|---|---|
-| weight bin edges | `StRoot/StFcsMLCategoryMaker/StFcsEnergyWeights.h` | last finite edge 60 | 70 and 80 added, `kNWB` 14 → 16 |
-| uniform bins, ePIC-style pages | `evalCategory.C` | 2 GeV ≤36, else 4 | 2 GeV ≤36, 4 GeV ≤64, 5 GeV above |
-| photon-separation bins | `evalCategory.C` | first edge 0.5 towers | 0.25 and 0.75 added, `nSB` 12 → 14 |
+| weight bin edges | `StRoot/StFcsMLCategoryMaker/StFcsEnergyWeights.h` | last finite edge 60 | now runs to **150**: 70, 80, 100, 120, 150, `kNWB` 14 → 19 |
+| uniform bins, ePIC-style pages | `evalCategory.C` | 2 GeV ≤36, else 4 | 2 ≤36, 4 ≤64, 5 ≤110, **10 above** |
+| photon-separation bins | `evalCategory.C` | first edge 0.5 towers | 0.15, 0.25, 0.75 added, `nSB` 12 → **15** |
 
 **The weight edges are the one that changes what gets trained.** `kEdge` ended at
 60 followed by an open bin to infinity, so every cluster from 60 GeV up — the
@@ -1816,7 +1816,34 @@ header, the fine energy axis in `evalCategory.C` grows geometrically to whatever
 `eTop` is, and the per-energy-band table finds its bands from the gaps in the
 generated energy (8 points up to 80 GeV is well inside `kMaxBands = 16`).
 
-What to check on the first 80 GeV run, in order:
+### Setting the energy axis by hand — `EMAX`
+
+Every macro picks the top of its energy axes from the sample: the `e<number>`
+in the file name, or the largest cluster energy in the tree, rounded up. That is
+right most of the time and wrong in two cases — when two samples must share an
+axis so their pages can be compared, and when a few outliers stretch the axis
+and squash everything real into the left third. `EMAX` overrides it, in GeV:
+
+```csh
+env EMAX=150 ./runTrainAll.sh 150GeV <files>
+env EMAX=150 ./runCrossCheck.sh feat_pico_80GeV.root 80 feat_pico_150GeV.root 150
+```
+
+It reaches `qaFeatures.C`, `qaSampleLabel.C` and both `evalCategory.C` calls, and
+in `runCrossCheck.sh` it is what lets two samples with different top energies be
+overlaid at all. **It changes only what is drawn.** No cluster is cut by it: the
+confusion matrices, the printed numbers and the training all see the full
+sample whatever `EMAX` says. Per macro the same thing is the `eMax` /
+`eAxisMax` argument, and 0 means "choose it from the sample".
+
+The training's own upper limit is a different thing: the last edge of
+`kEdge` in `StFcsEnergyWeights.h`, now 150 GeV. It only has any effect with
+`WEIGHTMODE=1`, and as with the lower edges, an edge the sample does not reach
+costs nothing — the bin comes back empty and is merged away. Extend it when a
+gun above 150 GeV is generated, or every cluster above the last finite edge
+shares one open-ended weight slice.
+
+What to check on the first run at a new energy, in order:
 
 1. `qaFeatures.C` — the per-gun generated-energy page should show the new spike
    at 80, and the cluster-energy page should show where the π⁰ response actually
@@ -1826,6 +1853,11 @@ What to check on the first 80 GeV run, in order:
    class is empty there, the energy prior described above simply moved up: the
    model will have no hadronic truth to learn from at 80 GeV either, and the
    honest quote stays bounded by where π⁻ clusters actually exist.
+0. At 100 GeV and above, the π⁰ opening angle is 0.35, 0.29 and 0.23 towers for
+   100, 120 and 150 GeV guns. Those are all inside the FIRST separation bin
+   (0–0.15) or the second — the merged-π⁰ page stops resolving them from each
+   other, and the merged and single-EM classes become nearly the same object.
+   Expect the Single EM / Merged π⁰ confusion to grow with every step up.
 3. The **cluster-energy** pages of the eval pdf (now written by default, ahead
    of the generated-energy ones) — the hadronic efficiency-vs-cluster-energy
    curve. The open question is whether it still falls off a cliff above ~30 GeV.

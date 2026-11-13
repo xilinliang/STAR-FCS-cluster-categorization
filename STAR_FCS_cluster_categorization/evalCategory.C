@@ -409,13 +409,13 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    const int nEB = (int)eBinV.size() - 1;
    const double* eBins = &eBinV[0];
    // Photon separation. The minimum opening of a pi0 is about 34.7/E towers:
-   // 0.58 at 60 GeV, 0.50 at 70, 0.43 at 80 - so with a first edge of 0.5 the
-   // whole high-energy end piles into one bin and the merged-pi0 efficiency
-   // there cannot be read. The two extra edges below one tower keep it
-   // resolved.
-   const int nSB = 14;
-   const double sBins[nSB + 1] = {0,   0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5,
-                                  3.0, 3.5,  4.0, 5.0,  6.0, 8.0, 11.0};
+   // 0.58 at 60 GeV, 0.43 at 80, 0.29 at 120, 0.23 at 150 - so the bins below
+   // one tower are what resolve the high-energy end at all, and each new gun
+   // energy lands in a narrower one. Without them the whole top of the range
+   // piles into a single bin and the merged-pi0 efficiency cannot be read.
+   const int nSB = 15;
+   const double sBins[nSB + 1] = {0,   0.15, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0,
+                                  2.5, 3.0,  3.5,  4.0, 5.0,  6.0, 8.0, 11.0};
 
    TEfficiency *effE_ml[3], *purE_ml[3], *effE_st[3], *purE_st[3];
    for (int k = 0; k < 3; k++) {
@@ -443,9 +443,9 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    const char* axShort[kNAx] = {"vs cluster energy", "vs generated energy"};
    const bool axOn[kNAx] = {energyAxis != 1, energyAxis != 0 && haveGen};
    const bool axFill[kNAx] = {true, haveGen};
-   // uniform bins for the ePIC-style pages: 2 GeV up to 36 GeV, wider above so
-   // a 60 or 80 GeV sample does not end up with 30 or 40 sparse bins
-   const double uStep = (eTop <= 36) ? 2.0 : (eTop <= 64) ? 4.0 : 5.0;
+   // uniform bins for the ePIC-style pages: fine at low energy, wider above, so
+   // that neither a 30 GeV nor a 150 GeV sample ends up with 15 bins or 75
+   const double uStep = (eTop <= 36) ? 2.0 : (eTop <= 64) ? 4.0 : (eTop <= 110) ? 5.0 : 10.0;
    const int nUB = (int)ceil(eTop / uStep);
    std::vector<double> uBinV(nUB + 1);
    for (int b = 0; b <= nUB; b++) uBinV[b] = uStep * b;

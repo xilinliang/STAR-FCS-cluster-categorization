@@ -30,8 +30,8 @@
 #   cmp_<tag><rt>.pdf      BDTG vs MLP on one figure
 #   ov<tag><rt>_*          the training-half evaluations, for the overtraining gap
 #
-# Set FEATURESET, EMIN, WEIGHTMODE, NORMMODE or LABELDEF in the environment to
-# override:
+# Set FEATURESET, EMIN, EMAX, WEIGHTMODE, NORMMODE or LABELDEF in the
+# environment to override:
 #
 #   env WEIGHTMODE=1 ./runTrainAll.sh ...
 #
@@ -70,6 +70,20 @@ fi
 
 fset="${FEATURESET:-13}"
 emin="${EMIN:-0.5}"
+# EMAX is the top of every energy axis, in GeV, for the QA pages and the
+# evaluation pages alike. 0 (the default) lets each macro choose it from the
+# sample - the gun energy in the file name, or the largest cluster energy in
+# the tree, rounded up. Set it by hand to put two samples on the SAME axis, or
+# when a handful of outliers would otherwise stretch the axis and squash
+# everything real into the left third:
+#
+#   env EMAX=150 ./runTrainAll.sh ...
+#
+# It changes only what is DRAWN. The clusters that go into the confusion
+# matrices, the printed numbers and the training are unaffected - no cluster is
+# ever cut by it. The training's own upper limit is the last edge of
+# StFcsEnergyWeights.h (150 GeV), which only matters with WEIGHTMODE=1.
+emax="${EMAX:-0}"
 wgt="${WEIGHTMODE:-0}"
 nrm="${NORMMODE:-0}"
 # LABELDEF picks the truth definition, and the evaluation follows it so the
@@ -161,14 +175,14 @@ fi
 # ---- 2. QA what is about to be trained on -----------------------------------
 # The merged file has many gun energies, so the energy axis comes from the data.
 echo "== QA of the merged sample"
-root4star -b -q "qaFeatures.C+(\"$feat\",\"qa_${tag}\",$emin,0,\"clusters\",$lbl)" \
+root4star -b -q "qaFeatures.C+(\"$feat\",\"qa_${tag}\",$emin,$emax,\"clusters\",$lbl)" \
    2>&1 | tee "qa_${tag}.log"
 
 # labelDef=2 ranks the clusters of an event and keeps only some of them, so QA
 # what actually reaches each class before training on it.
 if [ "$lbl" = "2" ]; then
    echo "== QA of the sample definition (what goes into each class)"
-   root4star -b -q "qaSampleLabel.C+(\"$feat\",\"qsmp_${tag}\",$emin,0)" \
+   root4star -b -q "qaSampleLabel.C+(\"$feat\",\"qsmp_${tag}\",$emin,0,\"clusters\",$emax)" \
       2>&1 | tee "qsmp_${tag}.log"
 fi
 
@@ -185,10 +199,10 @@ for m in BDTG MLP; do
       continue
    fi
    echo "== evaluating $m (test half)"
-   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",1,\"eval${tag}${rt}_${m}\",$emin,0.8,\"clusters\",$tdef,2)" \
+   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",1,\"eval${tag}${rt}_${m}\",$emin,0.8,\"clusters\",$tdef,2,$emax)" \
       2>&1 | tee "eval${tag}${rt}_${m}.log"
    echo "== evaluating $m (training half, for the overtraining gap)"
-   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",0,\"ov${tag}${rt}_${m}\",$emin,0.8,\"clusters\",$tdef,2)" \
+   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",0,\"ov${tag}${rt}_${m}\",$emin,0.8,\"clusters\",$tdef,2,$emax)" \
       2>&1 | tee "ov${tag}${rt}_${m}.log"
 done
 
