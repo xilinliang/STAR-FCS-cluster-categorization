@@ -431,6 +431,15 @@ sample the mix is whatever number of γ, π⁰ and π⁻ events you simulated, s
 purity only together with the mix — which the macro prints — or use the balanced
 one.
 
+The confusion matrix is printed and drawn **twice**: row-normalised, which is
+efficiency by construction, and in **raw clusters with both margins**. The second
+form is the one to work from whenever the class mix is uneven — the row total is
+the class sample, the column total is the purity denominator, and no fraction on
+the first page can tell you how big either is. Efficiency is then diagonal/row
+and purity diagonal/column, both computable by hand from the printed numbers. On
+the drawn page (1b) the axis labels carry the margins, so the totals sit beside
+the matrix.
+
 `evalFcsCat<set>_<method>.pdf` pages: the confusion matrices; the **ePIC-style
 figure** (below) for the model and for the FCS Cluster category, **on both energy
 axes — cluster energy first, then generated energy**; efficiency
