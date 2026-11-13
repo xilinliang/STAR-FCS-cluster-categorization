@@ -229,6 +229,27 @@ void printMatrix(const Confusion& m, const char* title, const char** colNames) {
       for (int j = 0; j < 3; j++) printf(" %13.3f", n > 0 ? m.c[i][j] / n : 0.0);
       printf(" %10.0f\n", n);
    }
+
+   // The same matrix in CLUSTERS, with both margins. The fractions above are
+   // row-normalised, so they show efficiency and hide everything else; the raw
+   // counts are what any purity, any mix and any error bar is actually computed
+   // from, and they are the only form you can recombine yourself.
+   printf("  the same in CLUSTERS, with both margins\n");
+   printf("  %-11s", "");
+   for (int j = 0; j < 3; j++) printf(" %13s", colNames[j]);
+   printf(" %10s\n", "TRUE tot");
+   double gtot = 0;
+   for (int i = 0; i < 3; i++) {
+      printf("  %-11s", kClsName[i]);
+      for (int j = 0; j < 3; j++) printf(" %13.0f", m.c[i][j]);
+      printf(" %10.0f\n", m.rowSum(i));
+      gtot += m.rowSum(i);
+   }
+   printf("  %-11s", "ASSIGNED tot");
+   for (int j = 0; j < 3; j++) printf(" %13.0f", m.colSum(j));
+   printf(" %10.0f\n", gtot);
+   printf("  (row total = the class sample; column total = everything called that class,\n"
+          "   so efficiency = diagonal/row and purity = diagonal/column)\n");
 }
 
 TEfficiency* makeEff(const char* name, const char* title, int nb, const double* bins) {
@@ -853,6 +874,42 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       hConf[m]->Write();
    }
    cv->Print(pdf + "(");
+
+   // page 1b: the same two matrices in CLUSTERS. The row-normalised page above
+   // cannot show how big each class is, and with an uneven class mix that is
+   // half the story - the column totals are the purity denominators.
+   {
+      TH2F* hCnt[2];
+      for (int m = 0; m < 2; m++) {
+         hCnt[m] = new TH2F(Form("hCount_%d", m),
+                            Form("%s: CLUSTERS in each cell;assigned;true", matTitle[m].Data()),
+                            3, 0, 3, 3, 0, 3);
+         for (int t = 0; t < 3; t++) {
+            for (int a = 0; a < 3; a++) hCnt[m]->SetBinContent(a + 1, t + 1, mats[m]->c[t][a]);
+            hCnt[m]->GetYaxis()->SetBinLabel(t + 1, Form("%s (%.0f)", kClsName[t], mats[m]->rowSum(t)));
+            hCnt[m]->GetXaxis()->SetBinLabel(t + 1,
+                                             Form("%s (%.0f)", m == 0 ? kClsName[t] : kStarName[t],
+                                                  mats[m]->colSum(t)));
+         }
+         hCnt[m]->SetMinimum(0);
+         hCnt[m]->SetMarkerSize(1.6);
+         cv->cd(m + 1);
+         gPad->SetLogy(0);
+         gPad->SetLeftMargin(0.22);
+         gPad->SetRightMargin(0.13);
+         gPad->SetBottomMargin(0.14);
+         hCnt[m]->Draw("colz text");
+         hCnt[m]->Write();  // fout is already the current directory here
+      }
+      cv->cd();
+      TLatex ct;
+      ct.SetNDC();
+      ct.SetTextSize(0.021);
+      ct.DrawLatexNDC(0.01, 0.985,
+                      "axis labels carry the margins: true-class totals on y, assigned totals on x."
+                      "  efficiency = diagonal / row,  purity = diagonal / column");
+      cv->Print(pdf);
+   }
 
    // the ePIC-style figure: for the model and for FCS Cluster, on each energy
    // axis that energyAxis asked for - so two pages with energyAxis 0 or 1, and
