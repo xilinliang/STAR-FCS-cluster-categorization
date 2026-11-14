@@ -30,7 +30,7 @@
 #   cmp_<tag><rt>.pdf      BDTG vs MLP on one figure
 #   ov<tag><rt>_*          the training-half evaluations, for the overtraining gap
 #
-# Set FEATURESET, EMIN, EMAX, WEIGHTMODE, NORMMODE or LABELDEF in the
+# Set FEATURESET, EMIN, EMAX, WEIGHTMODE, NORMMODE, LABELDEF or JOBNAME in the
 # environment to override:
 #
 #   env WEIGHTMODE=1 ./runTrainAll.sh ...
@@ -106,7 +106,18 @@ if [ ! -f "$feat" ] && [ -f "feat_${tag}.root" ]; then
    echo "== using feat_${tag}.root from an earlier run (new runs write $feat)"
    feat="feat_${tag}.root"
 fi
-job="FcsCat"
+# JOBNAME names the WEIGHT files, which the output tag does NOT: two runs with
+# the same feature set and label definition write the same
+# weights/<JOBNAME><set><suffix>_<method>.weights.xml and the second silently
+# overwrites the first, however different their tags. Give each sample its own
+# JOBNAME when you want to keep its model:
+#
+#   env LABELDEF=2 JOBNAME=Cat120 ./runTrainAll.sh 120GeV ...
+#       -> weights/Cat12013smp_BDTG.weights.xml
+#
+# evalCategory.C needs that same file later, so whatever you choose here is
+# what you pass to it.
+job="${JOBNAME:-FcsCat}"
 # trainTMVA.C builds its job name as <job><set><gen><w><eq>; mirror it exactly.
 wtag="${job}${fset}"
 [ "$lbl" = "1" ] && wtag="${wtag}gen"   # labelDef=1 -> "gen"

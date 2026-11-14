@@ -554,6 +554,14 @@ together through `LABELDEF`, and the evaluation always follows the training:
 env LABELDEF=2 ./runTrainAll.sh 80GeV gamma.e80...root pi0.e80...root pi-.e80...root
 ```
 
+`JOBNAME` names the **weight** files, which the output tag does not: two runs
+with the same feature set and label definition write the same
+`weights/<JOBNAME><set><suffix>_<method>.weights.xml`, and the second silently
+overwrites the first however different their tags. Give each sample its own
+`JOBNAME` when you want to keep its model — `env JOBNAME=Cat120 ...` writes
+`weights/Cat12013smp_BDTG.weights.xml` — and pass that same name to
+`evalCategory.C` afterwards.
+
 | `LABELDEF` | weight file | evaluated with | outputs |
 |---|---|---|---|
 | `1` (default) | `FcsCat13gen_*` | `truthDef=1` | `eval<tag>_*` |
