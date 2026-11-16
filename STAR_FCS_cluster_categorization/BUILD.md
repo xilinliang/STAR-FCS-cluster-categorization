@@ -588,9 +588,33 @@ measures how much each method is leaning on it:
 env FEATURESET=12 LABELDEF=2 EMAX=120 JOBNAME=S12_120 ./runTrainAll.sh 120GeV_s12 <files>
 ```
 
-A BDTG that barely moves and an MLP that drops several points would confirm the
-reading above, and would make set 12 the one to carry into any data or
-multi-particle study.
+**Measured, on the 120 GeV sample, same clusters (14767 / 11072 / 6036).**
+Set 12 minus set 13:
+
+| | Single EM eff | Hadronic eff | Merged π⁰ eff | Hadronic purity |
+|---|---|---|---|---|
+| BDTG | **−0.031** | −0.008 | +0.007 | **−0.032** |
+| MLP | **−0.026** | −0.011 | −0.013 | **−0.034** |
+
+**Both methods lose about the same** — roughly 3 points of Single EM efficiency
+and 3 of hadronic purity each, at 6σ and 8σ. The prediction from the rankings
+(BDTG flat, MLP collapses) was wrong: the MLP's weight metric called `nNeighbor`
+29 % of everything, the BDT's split metric called it uniform, and the ablation
+agreed with neither. **Only removal measures importance** — treat both rankings
+as hints about *where to look*, never as the answer.
+
+What `nNeighbor` actually does is visible in where the loss lands: Single EM
+efficiency and hadronic purity, with the merged class moving ≤0.013 and the
+separation table unchanged within errors. It is doing γ-versus-π⁻ separation — a
+π⁻ shower makes several clusters, a photon makes one — and nothing about π⁰
+merging. Which is exactly why it will not survive a crowded event, where every
+cluster has neighbours.
+
+**Use set 12 for anything headed toward data or a multi-particle study**, and
+treat the ~3-point gap as a measured systematic on the single-particle-to-data
+transfer rather than as performance you own. Set 13 remains the single-particle
+benchmark. The BDTG/MLP split — MLP ahead on the EM classes, BDTG on hadronic —
+is unchanged by the ablation, so that conclusion is robust.
 
 `JOBNAME` names the **weight** files, which the output tag does not: two runs
 with the same feature set and label definition write the same
