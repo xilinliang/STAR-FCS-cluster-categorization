@@ -87,7 +87,12 @@ TEfficiency* getU(TFile* f, int what, const char* who, const char* cls) {
    const char* kind = (what == 0) ? "eff" : "pur";
    TEfficiency* e = (TEfficiency*)f->Get(Form("%sU_%s_%s_%s", kind, gAxis, who, cls));
    if (!e) e = (TEfficiency*)f->Get(Form("%sU_%s_%s", kind, who, cls));  // pre-e0b8f1d
-   if (!e) gMissing++;
+   // The FCS Cluster category has no hadron class, so evalCategory.C never
+   // writes its "other" curves. That absence is expected and is already shown
+   // as "no class" in the table - counting it as a miss would make the warning
+   // fire on every single run, which is how a warning gets ignored.
+   const bool expected = (strcmp(who, "star") == 0 && strcmp(cls, kClsName[0]) == 0);
+   if (!e && !expected) gMissing++;
    return e;
 }
 
