@@ -554,6 +554,44 @@ together through `LABELDEF`, and the evaluation always follows the training:
 env LABELDEF=2 ./runTrainAll.sh 80GeV gamma.e80...root pi0.e80...root pi-.e80...root
 ```
 
+### Which variables matter - and one that matters too much
+
+TMVA prints a ranking per method during training; `grep -A 20 'Ranking result'
+train_<tag>.log` pulls both out. They measure different things — the BDT counts
+splits weighted by separation gain, the MLP sums squared input weights — so the
+two orders disagree, and both split credit arbitrarily between correlated
+variables (`sigmaMax`/`sigmaMin`/`sigmaRatio` are three views of one width).
+
+On the 120 GeV sample, set 13:
+
+| | BDTG | MLP |
+|---|---|---|
+| top | `logE` 0.129 | **`nNeighbor` 45.8 — 29 % of the total, 3.8× the next** |
+| spread | 11 of 13 within ±20 % of uniform (0.077) | strongly peaked |
+| bottom | `sigXY` 0.040 | `sigXY` 0.05 — 0.03 % |
+
+Two things to take from it. The BDTG ranking is almost **flat**: no variable
+carries the model, so the information is spread and redundant, and dropping any
+one of them should cost little. And `nNeighbor` dominates the MLP, which is the
+bad case — it counts the clusters neighbouring this one, and in a
+single-particle sample that is nearly a label (a γ gun gives 0 almost always, a
+π⁻ several). Nothing in a crowded event behaves that way, so a model leaning on
+it will not transfer, and the MLP's edge over the BDTG on the EM classes may be
+built on it. `sigXY` is near-dead weight in both and can go.
+
+**Set 12 is set 13 minus `nNeighbor`**, nothing else moved, added for exactly
+this test (`testFeatures.C` checks the first 12 names and values are identical
+to set 13's). Set 12 against set 13, on the same sample with the same labels,
+measures how much each method is leaning on it:
+
+```csh
+env FEATURESET=12 LABELDEF=2 EMAX=120 JOBNAME=S12_120 ./runTrainAll.sh 120GeV_s12 <files>
+```
+
+A BDTG that barely moves and an MLP that drops several points would confirm the
+reading above, and would make set 12 the one to carry into any data or
+multi-particle study.
+
 `JOBNAME` names the **weight** files, which the output tag does not: two runs
 with the same feature set and label definition write the same
 `weights/<JOBNAME><set><suffix>_<method>.weights.xml`, and the second silently

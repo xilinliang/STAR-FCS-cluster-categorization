@@ -27,7 +27,7 @@
 // The input variables come from StFcsClusterFeatures.h - the same header the
 // inference maker uses - so training and application cannot drift apart.
 //
-// Feature sets: 3, 4, 6, 10, 13 or 34. Set 3 is the 3x3 one - the id names the
+// Feature sets: 3, 4, 6, 10, 12, 13 or 34. Set 3 is the 3x3 one - the id names the
 // window, not the variable count, and it has 13 variables. It is the good
 // starting point: raw tower energies plus E, sigmaMax, sigmaMin and E1/E, with
 // none of the correlated derived triplets of set 13.
@@ -157,7 +157,7 @@
 
 void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
                const char* jobname = "FcsCat",
-               int featureSet = 13,          // 3, 4, 6, 10, 13 or 34 - see the note above
+               int featureSet = 13,          // 3,4,6,10,12,13,34 - see the note above
                const char* treename = "clusters",
                float purityCut = 0.8,
                float eMin = 0.5,

@@ -127,6 +127,7 @@ const double kW0 = 4.5;
 inline int nVar(int set) {
    if (set == 34) return 34;
    if (set == 6) return 6;
+   if (set == 12) return 12;  // set 13 minus nNeighbor
    if (set == 10) return 10;  // set 13 minus sigX, sigY, sigXY
    if (set == 4) return 15;   // set 3 plus the cluster position x, y
    if (set == 3) return 13;   // 9 tower energies + e + sigmaMax + sigmaMin + seedFrac
@@ -160,6 +161,19 @@ inline const char** varNames(int set) {
                                 "x",   "y"};
    static const char* n10[10] = {"logE",     "nTowers", "sigmaMax", "sigmaMin", "sigmaRatio",
                                  "theta",    "seedFrac", "e2Frac",  "e1e2Asym", "nNeighbor"};
+   // set 12: set 13 with nNeighbor removed and NOTHING else moved, so a set-12
+   // model is a set-13 model with one input deleted.
+   //
+   // Why this set exists. nNeighbor counts the clusters neighbouring this one,
+   // and in a SINGLE-PARTICLE sample that is nearly a label: a gamma gun gives
+   // 0 almost always, a pi- several. The MLP ranking on the 120 GeV sample put
+   // it first with 29% of the total importance, 3.8 times the next variable,
+   // while the BDTG spread it at essentially uniform weight. Nothing in a
+   // crowded event behaves that way, so a model leaning on it will not
+   // transfer. Set 12 against set 13 measures exactly how much is being leaned.
+   static const char* n12[12] = {"logE",     "nTowers",  "sigmaMax", "sigmaMin",
+                                 "sigmaRatio", "theta",  "seedFrac", "e2Frac",
+                                 "e1e2Asym", "sigX",     "sigY",     "sigXY"};
    static const char* n34[34] = {"e",   "x",   "y",   "nHits", "radius", "dispersion", "sigmaMin",
                                  "sigmaMax",
                                  "t00", "t01", "t02", "t03", "t04",
@@ -170,6 +184,7 @@ inline const char** varNames(int set) {
                                  "eOut"};
    if (set == 34) return n34;
    if (set == 6) return n6;
+   if (set == 12) return n12;
    if (set == 10) return n10;
    if (set == 4) return n4;
    if (set == 3) return n3;
@@ -277,9 +292,11 @@ inline int compute(int set, const ClusterInput& c, float* out) {
 
    if (set != 34) {
       // ----------------------------------------------------------- 13 / 10
-      // The two sets share every definition; set 10 simply stops before the
-      // detector-frame moments and puts nNeighbor in their place.
+      // The three sets share every definition. Set 10 stops before the
+      // detector-frame moments and puts nNeighbor in their place; set 12 keeps
+      // the moments and stops before nNeighbor.
       const bool wantMoments = (set != 10);
+      const bool wantNeighbor = (set != 12);
       double e1 = -1, e2 = -1;
       double wtot = 0, sx = 0, sy = 0, sxy = 0, mx = 0, my = 0;
       for (int k = 0; k < c.nTow; k++) {
@@ -321,6 +338,7 @@ inline int compute(int set, const ClusterInput& c, float* out) {
       out[9] = sqrt(fabs(sx / wtot - mx * mx));
       out[10] = sqrt(fabs(sy / wtot - my * my));
       out[11] = sxy / wtot - mx * my;
+      if (!wantNeighbor) return 12;
       out[12] = c.nNeighbor;
       return 13;
    }
