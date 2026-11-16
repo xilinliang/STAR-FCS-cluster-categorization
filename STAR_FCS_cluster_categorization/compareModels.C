@@ -24,6 +24,11 @@
 // markers on every panel, so each comparison still shows what STAR's own
 // category does on the same clusters. Pass withRef = 0 to leave it out.
 //
+// A last argument picks which energy axis the per-class pages use, "clu"
+// (default, cluster energy) or "gen" (generated). evalCategory.C writes both
+// sets when the genE branch is there; a .root file from before that change has
+// only one, under the older name, and is read through a fallback.
+//
 // The files must come from evaluations of the SAME feature file with the same
 // truthDef, or the comparison is meaningless; the macro cannot check that, so
 // generate them in one go:
@@ -66,6 +71,26 @@ TEfficiency* get(TFile* f, const char* name) {
    return (TEfficiency*)f->Get(name);
 }
 
+// The per-class curves on the ePIC-style pages.
+//
+// evalCategory.C used to write ONE set of them, effU_ml_<class>. Since it
+// started drawing both energy axes it writes two, effU_clu_ml_<class> and
+// effU_gen_ml_<class>, and this macro asking for the old name quietly found
+// nothing: empty frames and a table of dashes, with no error anywhere. Try the
+// current name first, then the old one, so a .root file from either era still
+// plots - and count the misses so a future rename cannot fail silently again.
+int gMissing = 0;
+const char* gAxis = "clu";
+
+TEfficiency* getU(TFile* f, int what, const char* who, const char* cls) {
+   if (!f) return 0;
+   const char* kind = (what == 0) ? "eff" : "pur";
+   TEfficiency* e = (TEfficiency*)f->Get(Form("%sU_%s_%s_%s", kind, gAxis, who, cls));
+   if (!e) e = (TEfficiency*)f->Get(Form("%sU_%s_%s", kind, who, cls));  // pre-e0b8f1d
+   if (!e) gMissing++;
+   return e;
+}
+
 // passed and total summed over every bin: the efficiency (or purity) of the
 // whole sample, with a binomial error
 void integrate(TEfficiency* e, double& pass, double& tot) {
@@ -106,7 +131,10 @@ void compareModels(const char* f1 = "evalFcsCat13_BDTG.root", const char* lab1 =
                    const char* f2 = "evalFcsCat13_MLP.root", const char* lab2 = "MLP set 13",
                    const char* f3 = "", const char* lab3 = "",
                    const char* f4 = "", const char* lab4 = "",
-                   const char* outName = "modelCompare", int withRef = 1) {
+                   const char* outName = "modelCompare", int withRef = 1,
+                   const char* axis = "clu") {  // "clu" cluster energy, "gen" generated
+   gAxis = (axis && axis[0]) ? axis : "clu";
+   gMissing = 0;
    gROOT->SetBatch(kTRUE);
    gStyle->SetOptStat(0);
    gStyle->SetPaperSize(28.0, 12.7);
@@ -141,7 +169,7 @@ void compareModels(const char* f1 = "evalFcsCat13_BDTG.root", const char* lab1 =
          printf("  %-16s", lab[m].Data());
          for (int j = 0; j < 3; j++) {
             const int k = kPanelCls[j];
-            TEfficiency* e = get(fin[m], Form("%sU_ml_%s", what == 0 ? "eff" : "pur", kClsName[k]));
+            TEfficiency* e = getU(fin[m], what, "ml", kClsName[k]);
             double p, t;
             integrate(e, p, t);
             if (t > 0)
@@ -155,7 +183,7 @@ void compareModels(const char* f1 = "evalFcsCat13_BDTG.root", const char* lab1 =
          printf("  %-16s", "FCS Cluster");
          for (int j = 0; j < 3; j++) {
             const int k = kPanelCls[j];
-            TEfficiency* e = get(fin[0], Form("%sU_star_%s", what == 0 ? "eff" : "pur", kClsName[k]));
+            TEfficiency* e = getU(fin[0], what, "star", kClsName[k]);
             double p, t;
             integrate(e, p, t);
             if (t > 0)
@@ -241,7 +269,7 @@ void compareModels(const char* f1 = "evalFcsCat13_BDTG.root", const char* lab1 =
          // macro follows whatever range evalCategory.C used
          double xmax = 32;
          {
-            TEfficiency* e = get(fin[0], Form("%sU_ml_%s", what == 0 ? "eff" : "pur", kClsName[k]));
+            TEfficiency* e = getU(fin[0], what, "ml", kClsName[k]);
             const TH1* ht = e ? e->GetTotalHistogram() : 0;
             if (ht) xmax = ht->GetXaxis()->GetBinUpEdge(ht->GetNbinsX());
          }
@@ -254,12 +282,12 @@ void compareModels(const char* f1 = "evalFcsCat13_BDTG.root", const char* lab1 =
          lg->SetTextSize(0.042);
          lg->SetNColumns(2);
          for (int m = 0; m < nM; m++) {
-            TEfficiency* e = get(fin[m], Form("%sU_ml_%s", what == 0 ? "eff" : "pur", kClsName[k]));
+            TEfficiency* e = getU(fin[m], what, "ml", kClsName[k]);
             TGraphAsymmErrors* g = drawEff(e, kMColor[m], kMMarker[m]);
             if (g) lg->AddEntry(g, lab[m].Data(), "lp");
          }
          if (withRef) {
-            TEfficiency* e = get(fin[0], Form("%sU_star_%s", what == 0 ? "eff" : "pur", kClsName[k]));
+            TEfficiency* e = getU(fin[0], what, "star", kClsName[k]);
             TGraphAsymmErrors* g = drawEff(e, kGray + 2, 24);
             if (g) lg->AddEntry(g, "FCS Cluster", "lp");
          }
@@ -293,5 +321,13 @@ void compareModels(const char* f1 = "evalFcsCat13_BDTG.root", const char* lab1 =
    ls->Draw();
    cv->Print((pdf + ")").Data());
 
+   if (gMissing > 0) {
+      printf("\nWARNING: %d per-class curve(s) were not found in the input file(s).\n", gMissing);
+      printf("  The ePIC-style efficiency and purity pages will be blank where that happened.\n");
+      printf("  evalCategory.C writes them as effU_<axis>_ml_<class> with axis = clu or gen;\n");
+      printf("  this run looked for axis \"%s\". A file written before the dual energy axes\n", gAxis);
+      printf("  uses the older effU_ml_<class>, which is tried as a fallback. If both miss,\n");
+      printf("  the evaluation that made the file did not get that far - check its log.\n");
+   }
    printf("\nwrote %s\n", pdf.Data());
 }
