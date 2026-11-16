@@ -284,7 +284,11 @@ void evalCategory(const char* infile = "feat_pico_all.root",
                   const char* treename = "clusters",
                   int truthDef = 0,     // 0 mcLabel, 1 gun cleaned, 2 gun raw, 3 sample-based - see header
                   int energyAxis = 2,   // ePIC-style pages: 0 cluster E, 1 generated E, 2 both
-                  float eAxisMax = 0) { // upper end of the energy axes; 0 = automatic
+                  float eAxisMax = 0,   // upper end of the energy axes; 0 = automatic
+                  int withRef = 1) {    // 0 leaves the FCS Cluster category off the PAGES
+   // withRef affects only what is DRAWN. The printed tables always carry the
+   // FCS Cluster comparison, because it is the reference the whole study is
+   // measured against and it costs nothing to print.
    using namespace StFcsClusterFeatures;
    gSystem->Load("libTMVA");
    gROOT->SetBatch(kTRUE);
@@ -854,8 +858,9 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    // TString, not Form(): Form() writes into a circular buffer that later
    // Form() calls overwrite, so its result must not be kept around
    const TString matTitle[2] = {TString::Format("%s (set %d)", method, featureSet), kRefName};
-   cv->Divide(2, 1);
-   for (int m = 0; m < 2; m++) {
+   const int nMat = withRef ? 2 : 1;
+   if (nMat > 1) cv->Divide(2, 1);
+   for (int m = 0; m < nMat; m++) {
       hConf[m] = new TH2F(Form("hConf_%d", m),
                           Form("%s: fraction of each TRUE class;assigned;true", matTitle[m].Data()), 3, 0, 3, 3, 0, 3);
       for (int t = 0; t < 3; t++) {
@@ -867,7 +872,8 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       hConf[m]->SetMinimum(0);
       hConf[m]->SetMaximum(1);
       hConf[m]->SetMarkerSize(1.8);
-      cv->cd(m + 1);
+      if (nMat > 1) cv->cd(m + 1);
+      else cv->cd();
       gPad->SetLeftMargin(0.16);
       gPad->SetRightMargin(0.13);
       hConf[m]->Draw("colz text");
@@ -880,7 +886,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    // half the story - the column totals are the purity denominators.
    {
       TH2F* hCnt[2];
-      for (int m = 0; m < 2; m++) {
+      for (int m = 0; m < nMat; m++) {
          hCnt[m] = new TH2F(Form("hCount_%d", m),
                             Form("%s: CLUSTERS in each cell;assigned;true", matTitle[m].Data()),
                             3, 0, 3, 3, 0, 3);
@@ -893,7 +899,8 @@ void evalCategory(const char* infile = "feat_pico_all.root",
          }
          hCnt[m]->SetMinimum(0);
          hCnt[m]->SetMarkerSize(1.6);
-         cv->cd(m + 1);
+         if (nMat > 1) cv->cd(m + 1);
+         else cv->cd();
          gPad->SetLogy(0);
          gPad->SetLeftMargin(0.22);
          gPad->SetRightMargin(0.13);
@@ -924,7 +931,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
          if (!axOn[ax]) continue;
          TEfficiency** effP[2] = {effU_ml[ax], effU_st[ax]};
          TEfficiency** purP[2] = {purU_ml[ax], purU_st[ax]};
-         for (int m = 0; m < 2; m++) {
+         for (int m = 0; m < (withRef ? 2 : 1); m++) {
             cv->Clear();
             cv->cd();
             tx.SetTextAlign(22);
@@ -1003,10 +1010,11 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       leg[p]->SetBorderSize(0);
       leg[p]->SetFillStyle(0);
       leg[p]->SetTextSize(0.042);
-      leg[p]->SetNColumns(2);  // left column the model, right column FCS Cluster
+      leg[p]->SetNColumns(withRef ? 2 : 1);  // right column is FCS Cluster
       for (int k = 0; k < 3; k++) {
          TGraphAsymmErrors* g = drawEff(effs[p][0][k], kClsColor[k], 20);
          leg[p]->AddEntry(g, Form("%s, %s", kClsName[k], method), "lp");
+         if (!withRef) continue;
          if (k == 0) {
             leg[p]->AddEntry((TObject*)0, "", "");  // FCS Cluster has no "other" class
             continue;
@@ -1029,7 +1037,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    lsep->SetBorderSize(0);
    lsep->SetFillStyle(0);
    TGraphAsymmErrors* gs1 = drawEff(effSep_ml, kClsColor[2], 20);
-   TGraphAsymmErrors* gs2 = drawEff(effSep_st, kClsColor[2], 24);
+   TGraphAsymmErrors* gs2 = withRef ? drawEff(effSep_st, kClsColor[2], 24) : 0;
    if (gs1) lsep->AddEntry(gs1, method, "lp");
    if (gs2) lsep->AddEntry(gs2, Form("%s (category 2)", kRefName), "lp");
    lsep->Draw();
@@ -1118,13 +1126,14 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    if (perParticle) {
       // page 8: per particle - what the clusters truly are, and what each method calls them
       cv->Clear();
-      cv->Divide(3, 1);
+      const int nPane = withRef ? 3 : 2;
+      cv->Divide(nPane, 1);
       TString ttl[3] = {"true class (photons in the cluster)", TString::Format("%s (set %d)", method, featureSet),
                         TString(kRefName)};
       int rowOf[kNPart];
       int nRow = 0;
       for (int p = 0; p < kNPart; p++) rowOf[p] = (partClus[p] > 0) ? nRow++ : -1;
-      for (int m = 0; m < 3; m++) {
+      for (int m = 0; m < nPane; m++) {
          TH2F* h = new TH2F(Form("hPart_%d", m), Form("%s;;generated particle", ttl[m].Data()), 3, 0, 3,
                             nRow, 0, nRow);
          for (int p = 0; p < kNPart; p++) {

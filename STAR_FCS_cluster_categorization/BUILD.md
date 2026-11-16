@@ -431,6 +431,26 @@ sample the mix is whatever number of γ, π⁰ and π⁻ events you simulated, s
 purity only together with the mix — which the macro prints — or use the balanced
 one.
 
+### Leaving the FCS Cluster category off the figures — `SHOWREF`
+
+`catStar` is drawn beside the model on most pages, and it crowds them: an extra
+matrix on the confusion page, an extra ePIC-style page, open markers on the
+all-classes and separation pages, a third pane on the per-particle page. `SHOWREF`
+turns that off, and it **defaults to 0** in `runTrainAll.sh` and
+`runCrossCheck.sh`:
+
+```csh
+env SHOWREF=1 ./runTrainAll.sh ...     # draw the reference as well
+```
+
+Per macro it is the last argument — `withRef` in `qaFeatures.C`,
+`evalCategory.C` and `compareModels.C`, where it has always existed.
+
+**The printed tables carry the FCS Cluster numbers either way.** It is the
+reference the whole study is measured against, printing it costs nothing, and a
+figure that omits it is a presentation choice rather than a decision to stop
+measuring against it.
+
 The confusion matrix is printed and drawn **twice**: row-normalised, which is
 efficiency by construction, and in **raw clusters with both margins**. The second
 form is the one to work from whenever the class mix is uneven — the row total is

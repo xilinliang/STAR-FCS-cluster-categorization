@@ -30,8 +30,8 @@
 #   cmp_<tag><rt>.pdf      BDTG vs MLP on one figure
 #   ov<tag><rt>_*          the training-half evaluations, for the overtraining gap
 #
-# Set FEATURESET, EMIN, EMAX, WEIGHTMODE, NORMMODE, LABELDEF or JOBNAME in the
-# environment to override:
+# Set FEATURESET, EMIN, EMAX, WEIGHTMODE, NORMMODE, LABELDEF, JOBNAME or
+# SHOWREF in the environment to override:
 #
 #   env WEIGHTMODE=1 ./runTrainAll.sh ...
 #
@@ -84,6 +84,16 @@ emin="${EMIN:-0.5}"
 # ever cut by it. The training's own upper limit is the last edge of
 # StFcsEnergyWeights.h (150 GeV), which only matters with WEIGHTMODE=1.
 emax="${EMAX:-0}"
+# SHOWREF draws the FCS Cluster category beside the model on the QA, evaluation
+# and comparison pages. It defaults to 0 - off - because the reference crowds
+# every figure and is usually wanted only when the comparison IS the point.
+#
+#   env SHOWREF=1 ./runTrainAll.sh ...
+#
+# The PRINTED tables carry the FCS Cluster numbers either way: they are the
+# reference the whole study is measured against, and printing them costs
+# nothing. Only the drawn pages change.
+showref="${SHOWREF:-0}"
 wgt="${WEIGHTMODE:-0}"
 nrm="${NORMMODE:-0}"
 # LABELDEF picks the truth definition, and the evaluation follows it so the
@@ -186,7 +196,7 @@ fi
 # ---- 2. QA what is about to be trained on -----------------------------------
 # The merged file has many gun energies, so the energy axis comes from the data.
 echo "== QA of the merged sample"
-root4star -b -q "qaFeatures.C+(\"$feat\",\"qa_${tag}\",$emin,$emax,\"clusters\",$lbl)" \
+root4star -b -q "qaFeatures.C+(\"$feat\",\"qa_${tag}\",$emin,$emax,\"clusters\",$lbl,$showref)" \
    2>&1 | tee "qa_${tag}.log"
 
 # labelDef=2 ranks the clusters of an event and keeps only some of them, so QA
@@ -210,23 +220,23 @@ for m in BDTG MLP; do
       continue
    fi
    echo "== evaluating $m (test half)"
-   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",1,\"eval${tag}${rt}_${m}\",$emin,0.8,\"clusters\",$tdef,2,$emax)" \
+   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",1,\"eval${tag}${rt}_${m}\",$emin,0.8,\"clusters\",$tdef,2,$emax,$showref)" \
       2>&1 | tee "eval${tag}${rt}_${m}.log"
    echo "== evaluating $m (training half, for the overtraining gap)"
-   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",0,\"ov${tag}${rt}_${m}\",$emin,0.8,\"clusters\",$tdef,2,$emax)" \
+   root4star -b -q "evalCategory.C+(\"$feat\",\"$w\",$fset,\"$m\",0,\"ov${tag}${rt}_${m}\",$emin,0.8,\"clusters\",$tdef,2,$emax,$showref)" \
       2>&1 | tee "ov${tag}${rt}_${m}.log"
 done
 
 # ---- 5. compare ------------------------------------------------------------
 if [ -f "eval${tag}${rt}_BDTG.root" ] && [ -f "eval${tag}${rt}_MLP.root" ]; then
    echo "== BDTG vs MLP"
-   root4star -b -q "compareModels.C+(\"eval${tag}${rt}_BDTG.root\",\"BDTG\",\"eval${tag}${rt}_MLP.root\",\"MLP\",\"\",\"\",\"\",\"\",\"cmp_${tag}${rt}\")" \
+   root4star -b -q "compareModels.C+(\"eval${tag}${rt}_BDTG.root\",\"BDTG\",\"eval${tag}${rt}_MLP.root\",\"MLP\",\"\",\"\",\"\",\"\",\"cmp_${tag}${rt}\",$showref)" \
       2>&1 | tee "cmp_${tag}${rt}.log"
 fi
 for m in BDTG MLP; do
    if [ -f "ov${tag}${rt}_${m}.root" ] && [ -f "eval${tag}${rt}_${m}.root" ]; then
       echo "== overtraining gap, $m"
-      root4star -b -q "compareModels.C+(\"ov${tag}${rt}_${m}.root\",\"training half\",\"eval${tag}${rt}_${m}.root\",\"test half\",\"\",\"\",\"\",\"\",\"ovCheck_${tag}${rt}_${m}\")" \
+      root4star -b -q "compareModels.C+(\"ov${tag}${rt}_${m}.root\",\"training half\",\"eval${tag}${rt}_${m}.root\",\"test half\",\"\",\"\",\"\",\"\",\"ovCheck_${tag}${rt}_${m}\",$showref)" \
          2>&1 | tee "ovCheck_${tag}${rt}_${m}.log"
    fi
 done

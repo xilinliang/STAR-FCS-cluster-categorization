@@ -185,8 +185,9 @@ void qaFeatures(const char* infile = "feat_pico.root",
                 float eMin = 0.5,            // same cut as trainTMVA.C / evalCategory.C
                 float eMax = 0,              // upper end of every energy axis; 0 = automatic
                 const char* treename = "clusters",
-                int labelDef = 0) {          // which truth splits the per-CLASS page:
+                int labelDef = 0,            // which truth splits the per-CLASS page:
                                              //   0 mcLabel, 1 gun cleaned, 2 sample-based
+                int withRef = 1) {           // 0 leaves the FCS Cluster category off the pages
    using namespace StFcsClusterFeatures;
    gROOT->SetBatch(kTRUE);
    gStyle->SetOptStat(0);
@@ -524,7 +525,9 @@ void qaFeatures(const char* infile = "feat_pico.root",
 
    // ------------------------------------------------ page 1: overview
    cv->Divide(4, 2);
-   TH1* ov[8] = {hE, hGenE, hXY[0], hXY[1], hNTow, hNNb, hCat, hCls};
+   // with withRef = 0 the catStar pane gives way to a second copy of the class
+   // pane, so the overview never shows an empty slot
+   TH1* ov[8] = {hE, hGenE, hXY[0], hXY[1], hNTow, hNNb, withRef ? hCat : hCls, hCls};
    for (int k = 0; k < kNCls; k++) hCls->GetXaxis()->SetBinLabel(k + 1, kQaClsName[k]);
    hCat->GetXaxis()->SetBinLabel(1, "0 ambiguous");
    hCat->GetXaxis()->SetBinLabel(2, "1 onePhoton");

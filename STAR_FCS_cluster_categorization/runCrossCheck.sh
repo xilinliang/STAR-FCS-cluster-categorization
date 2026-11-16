@@ -41,6 +41,7 @@
 # Environment overrides:
 #   FEATURESET=3   feature set            METHOD=MLP   method to table
 #   EMIN=0.5       cluster energy cut     NORMMODE=0   1 = EqualNumEvents
+#   SHOWREF=0      1 draws the FCS Cluster category on the pages too
 #   EMAX=0         top of every energy axis in GeV; 0 = from the sample. Set it
 #                  by hand to put the two samples on the SAME axis, which is the
 #                  whole point here - two files with different top energies
@@ -81,6 +82,7 @@ done
 fset="${FEATURESET:-3}"
 emin="${EMIN:-0.5}"
 emax="${EMAX:-0}"
+showref="${SHOWREF:-0}"
 meth="${METHOD:-MLP}"
 nrm="${NORMMODE:-0}"
 wgt="${WEIGHTMODE:-1}"
@@ -127,7 +129,7 @@ for wp in "$nA:$wA" "$nB:$wB"; do
          out="x_${wn}W_${dn}D${rt}${sfx2}"
          echo "== $meth trained on $wn, evaluated on $dn ($([ $half = 1 ] && echo test || echo training) half)"
          root4star -b -q \
-            "evalCategory.C+(\"$d\",\"$w\",$fset,\"$meth\",$half,\"$out\",$emin,0.8,\"clusters\",1,2,$emax)" \
+            "evalCategory.C+(\"$d\",\"$w\",$fset,\"$meth\",$half,\"$out\",$emin,0.8,\"clusters\",1,2,$emax,$showref)" \
             2>&1 | tee "${out}.log"
       done
    done
