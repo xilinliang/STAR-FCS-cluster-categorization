@@ -431,6 +431,44 @@ sample the mix is whatever number of γ, π⁰ and π⁻ events you simulated, s
 purity only together with the mix — which the macro prints — or use the balanced
 one.
 
+### The energy scan: 1–80, 1–120, 1–150 GeV
+
+Three continuous single-particle samples, set 13, `labelDef=2` / `truthDef=3`,
+unweighted, held-out half. Efficiency, which does not depend on the class mix:
+
+| class | method | 1–80 | 1–120 | 1–150 |
+|---|---|---|---|---|
+| Hadron | BDTG | 0.908 | 0.926 | 0.933 |
+| | MLP | 0.821 | 0.871 | 0.894 |
+| Single EM | BDTG | 0.820 | 0.786 | 0.767 |
+| | MLP | 0.880 | 0.834 | 0.798 |
+| | FCS Cluster | 0.620 | 0.496 | 0.429 |
+| Merged π⁰ | BDTG | 0.793 | 0.725 | 0.687 |
+| | MLP | 0.823 | 0.755 | 0.731 |
+| | FCS Cluster | 0.251 | 0.130 | 0.100 |
+
+**Both EM classes degrade monotonically**, and that is the π⁰ opening angle
+closing: 34.7/E towers gives 0.43, 0.29 and 0.23 at the three top energies. At a
+quarter of a tower a merged π⁰ and a single photon are very nearly the same
+object, so Single EM and Merged π⁰ lose to each other. This is the physical
+limit of the shower-shape approach, and it is where it sits.
+
+**The rising hadronic efficiency is a sample artefact, not an improvement.**
+`logE` is the BDTG's top-ranked variable at every energy. Stretching the sample
+upward stretches the EM classes with it while the hadronic clusters stay low, so
+"low energy ⇒ hadronic" becomes a better rule *within that sample*. The energy
+prior is growing with the range. Do not quote the 0.933.
+
+**The margin over the FCS Cluster category grows with energy**, because it
+degrades faster than the model does — merged π⁰ at 3.3×, 5.8×, then **7.3×**.
+At 1–150 GeV the model gets 1.8× its Single EM efficiency at 2.0× its balanced
+purity, and 7.3× its merged-π⁰ efficiency at 1.55×. That strengthening is the
+cleanest result in the study.
+
+The MLP's merged-π⁰ advantage over the BDTG also grows, +0.030 at 120 GeV to
++0.044 at 150 — but the growth is 1.3σ, consistent with the ranking's story
+rather than evidence for it. Another energy point would settle it.
+
 ### Leaving the FCS Cluster category off the figures — `SHOWREF`
 
 `catStar` is drawn beside the model on most pages, and it crowds them: an extra
