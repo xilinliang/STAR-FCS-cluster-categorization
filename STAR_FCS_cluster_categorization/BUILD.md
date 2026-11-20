@@ -469,6 +469,44 @@ The MLP's merged-π⁰ advantage over the BDTG also grows, +0.030 at 120 GeV to
 +0.044 at 150 — but the growth is 1.3σ, consistent with the ranking's story
 rather than evidence for it. Another energy point would settle it.
 
+### The merged-π⁰ valley at ~105 GeV in the 1–150 sample
+
+On the cluster-energy page of the 1–150 GeV evaluation the merged-π⁰ efficiency
+rises to ~0.87 at 45–65 GeV, falls to **0.48 at ~105**, then climbs again to 0.83
+at 145. It is two opposing trends balancing, and only one of them is real.
+
+| cluster E | MergedPi0 share of the bin | merged efficiency | merged purity |
+|---|---|---|---|
+| 45 | 0.34 | 0.87 | 0.88 |
+| 65 | 0.41 | 0.86 | 0.86 |
+| 85 | 0.45 | 0.75 | 0.75 |
+| **105** | 0.47 | **0.48** | 0.81 |
+| 125 | ~0.49 | 0.60 | 0.66 |
+| 145 | ~0.55 | 0.83 | 0.59 |
+
+**Falling, 60 → 105 GeV: physics.** The π⁰ opening goes from 0.58 towers to 0.33,
+so a merged π⁰ looks steadily more like one photon. This is the real degradation.
+
+**Rising, 105 → 145 GeV: the class prior.** The class share (page 4 of
+`qaSampleLabel.C`) climbs smoothly and monotonically across the whole range — no
+dip at 105 — and 1EM and MergedPi0 cross near 125–130 GeV, which is exactly
+where the merged efficiency overtakes the Single EM efficiency. As the merged
+class becomes the majority of its bins the model swings toward it: efficiency
+0.48 → 0.83 **while purity falls 0.81 → 0.59**, and Single EM efficiency
+collapses 0.88 → 0.34 over the same span. The opening angle is still shrinking
+(0.24 towers at 145), so nothing became easier; the gains are bought with
+mistakes.
+
+The minimum is where the two cancel. **The 1–80 sample shows no valley** because
+there the merged share only reaches ~0.45 and never crosses 1EM, and the opening
+at the endpoint is 0.43 rather than 0.24 towers — both effects too weak for the
+curve to turn over.
+
+**Do not quote the recovery.** For the 1–150 sample the honest statement is that
+merged-π⁰ performance peaks at 45–65 GeV, ~0.87 efficiency at ~0.87 purity, and
+declines above that. Any efficiency quoted above ~105 GeV has to carry its
+purity beside it or it describes the prior rather than the model.
+
 ### Leaving the FCS Cluster category off the figures — `SHOWREF`
 
 `catStar` is drawn beside the model on most pages, and it crowds them: an extra
