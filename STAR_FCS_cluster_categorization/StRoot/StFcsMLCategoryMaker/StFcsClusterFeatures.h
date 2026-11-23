@@ -369,7 +369,12 @@ inline int compute(int set, const ClusterInput& c, float* out) {
    // Both need the energy-weighted and log-weighted radii, so they share the
    // tower loop; only set 34 also needs the 5x5 grid and the leakage term.
    const bool want34 = (set == 34);
-   if (!want34 && c.eta < -100) return 0;  // no eta branch in this file
+   // eta has to be a plausible FCS value. -999 is the "no eta branch" default;
+   // a 0 or a ~1e10 is what an EMPTY four-momentum gives, the failure mode
+   // when nothing called setFourMomentum() on the cluster. The window is
+   // deliberately loose - the ECal covers roughly 2.5 to 4.2 - so this is a
+   // sanity guard against a sentinel, not a physics cut on acceptance.
+   if (!want34 && !(c.eta > 1.0 && c.eta < 8.0)) return 0;
    int seedRow = 0, seedCol = 0;
    double emax = -1;
    for (int k = 0; k < c.nTow; k++) {

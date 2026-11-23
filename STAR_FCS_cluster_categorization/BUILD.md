@@ -663,15 +663,37 @@ const TLorentzVector p4 = clu->fourMomentum();
 bPt = p4.Pt();  bEta = p4.Eta();  bPhi = p4.Phi();
 ```
 
-**StEvent / MuDst.** `StFcsCluster` stores the centroid in column/row units, so
-the geometry has to place it first, and then the four-momentum is built
-massless along that direction:
+**StEvent / MuDst.** `StFcsCluster` stores one too — the accessor returns a
+**const reference** to the member, so there is nothing to recompute:
 
 ```cpp
-StThreeVectorD xyz = mFcsDb->getStarXYZfromColumnRow(det, bX, bY);
-StLorentzVectorD p4 = mFcsDb->getLorentzVector(xyz, bE, 0.0);
+const StLorentzVectorD& fourMomentum() const;
+```
+
+So both paths read a stored four-momentum, and that is what the code does.
+The geometry route survives only as a **fallback**, because a stored
+four-momentum is only as good as its filler: if nothing in the chain called
+`setFourMomentum()`, the member is default-constructed and `pseudoRapidity()`
+on a null vector returns a sentinel rather than failing. Hence
+
+```cpp
+StLorentzVectorD p4 = clu->fourMomentum();
+if (!(p4.e() > 0) || !(p4.vect().mag2() > 0))      // nobody filled it
+   p4 = mFcsDb->getLorentzVector(xyz, bE, 0.0);    // what the maker would use
 bEta = p4.pseudoRapidity();  bPhi = p4.phi();  bPt = p4.perp();
 ```
+
+`starX/Y/Z` still need `getStarXYZfromColumnRow(det, x, y)` regardless — the
+centroid is stored in column/row units — so on this path the lookup is already
+being made and the fallback is one extra line on top of it.
+
+**Why the stored one rather than always rebuilding it.** `StFcsClusterFeatureMaker`
+writes the tree's `eta`; `StFcsMLCategoryMaker` has to produce the same number
+at apply time. Two call sites rebuilding it from geometry agree only as long as
+nobody edits one of them; two call sites reading one stored member agree by
+construction. `compute()` additionally refuses set 7 on an eta outside a loose
+`1 < eta < 8` window, so an empty four-momentum stops training instead of being
+fitted as a sentinel.
 
 Either way the feature tree gets **`starX`, `starY`, `starZ`, `pt`, `eta`,
 `phi`** beside `e`, `x`, `y`. The mass argument is 0 because a calorimeter
@@ -731,12 +753,13 @@ untouched by set 7.)
 stops training with an empty tree rather than fitting the sentinel.
 
 A **rebuild is still needed to APPLY** a set-7 model in `setMode(1)`, because
-the two appliers did change: each now fills `c.eta` with the same call its
-feature maker uses — `getLorentzVector(getStarXYZfromColumnRow(det,x,y), e, 0)
-.pseudoRapidity()` on the StEvent path, `clu->fourMomentum().Eta()` on the pico
-path, where the cluster carries its own four-momentum. Matching the call
-exactly is the point: an eta computed a different way at apply time would not
-be the variable the model was trained on.
+the two appliers did change: each now fills `c.eta` from the cluster's own
+stored four-momentum, the same source its feature maker writes the branch from
+— `clu->fourMomentum().pseudoRapidity()` on the StEvent path (geometry
+fallback), `clu->fourMomentum().Eta()` on the pico path. Reading one stored
+number on both sides is the point: an eta computed a different way at apply
+time would not be the variable the model was trained on. See *The cluster
+four-momentum* above.
 
 The angle is taken about the origin. For these `vz0` samples that *is* the
 vertex; with a displaced vertex it would be the cluster's eta about (0,0,0)

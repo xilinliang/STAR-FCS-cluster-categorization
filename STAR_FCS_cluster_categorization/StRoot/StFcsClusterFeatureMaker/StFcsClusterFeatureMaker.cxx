@@ -492,11 +492,29 @@ Int_t StFcsClusterFeatureMaker::Make() {
          bChi2Ndf1 = clu->chi2Ndf1Photon();
          bChi2Ndf2 = clu->chi2Ndf2Photon();
 
+         // The STAR position still needs the geometry - the centroid is stored
+         // in column/row units - so starX/Y/Z come from the lookup either way.
          StThreeVectorD xyz = mFcsDb->getStarXYZfromColumnRow(det, bX, bY);
          bStarX = xyz.x();
          bStarY = xyz.y();
          bStarZ = xyz.z();
-         StLorentzVectorD p4 = mFcsDb->getLorentzVector(xyz, bE, 0.0);
+
+         // THE FOUR-MOMENTUM comes from the cluster itself when it has one.
+         // StFcsCluster stores it (fourMomentum() returns a const reference to
+         // the member), so whoever reconstructed the cluster has already fixed
+         // the direction, and taking it from there is what keeps this tree's
+         // eta equal to the eta StFcsMLCategoryMaker computes at apply time -
+         // they read the same stored number instead of two call sites that
+         // have to be kept matching by hand.
+         //
+         // It is only as good as its filler, though: if nothing in the chain
+         // called setFourMomentum(), the member is default-constructed and
+         // pseudoRapidity() on a null vector returns a sentinel, not an error.
+         // So fall back to building it from the position, which is what
+         // StFcsClusterMaker would have used anyway.
+         StLorentzVectorD p4 = clu->fourMomentum();
+         if (!(p4.e() > 0) || !(p4.vect().mag2() > 0))
+            p4 = mFcsDb->getLorentzVector(xyz, bE, 0.0);
          bEta = p4.pseudoRapidity();
          bPhi = p4.phi();
          bPt = p4.perp();

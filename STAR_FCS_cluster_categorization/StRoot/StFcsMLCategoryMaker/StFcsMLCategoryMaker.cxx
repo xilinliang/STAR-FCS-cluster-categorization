@@ -95,18 +95,24 @@ int StFcsMLCategoryMaker::features(StFcsCluster* clu, StFcsDb* db, int set, floa
    c.sigmaMin = clu->sigmaMin();
    c.sigmaMax = clu->sigmaMax();
    c.theta = clu->theta();
-   // CLUSTER PSEUDORAPIDITY, for feature set 7, by the same two calls
-   // StFcsClusterFeatureMaker makes to fill the tree's eta branch - the
-   // centroid is in column/row units, so the geometry turns it into a STAR
-   // position and getLorentzVector makes the massless four-momentum that
-   // points at it. Using the identical call is the point: an eta computed any
-   // other way here would not be the variable the model was trained on. The
-   // angle is about the origin, the vertex only for a vz = 0 sample.
-   // compute() refuses set 7 if this stays at -999.
+   // CLUSTER PSEUDORAPIDITY, for feature set 7, from the SAME source
+   // StFcsClusterFeatureMaker fills the tree's eta branch from: the cluster's
+   // own stored four-momentum, with the geometry fallback for a cluster whose
+   // setFourMomentum() was never called. Reading one stored number on both
+   // sides is the point - an eta computed a different way here would not be
+   // the variable the model was trained on. The direction is the one the
+   // cluster reconstruction fixed, which is about the origin: the vertex for
+   // a vz = 0 sample, not for a displaced one. compute() refuses set 7 on an
+   // eta outside a plausible FCS window, so a failure here stops training
+   // rather than feeding it a sentinel.
    c.eta = -999.0f;
-   if (db) {
-      const StThreeVectorD xyz = db->getStarXYZfromColumnRow(det, c.x, c.y);
-      c.eta = db->getLorentzVector(xyz, c.e, 0.0).pseudoRapidity();
+   {
+      StLorentzVectorD p4 = clu->fourMomentum();
+      if ((!(p4.e() > 0) || !(p4.vect().mag2() > 0)) && db) {
+         const StThreeVectorD xyz = db->getStarXYZfromColumnRow(det, c.x, c.y);
+         p4 = db->getLorentzVector(xyz, c.e, 0.0);
+      }
+      if (p4.vect().mag2() > 0) c.eta = p4.pseudoRapidity();
    }
    c.nTowers = clu->nTowers();
    c.nNeighbor = clu->nNeighbor();
