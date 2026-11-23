@@ -1,5 +1,5 @@
 // qaFeatures.C - quality-assurance plots for every input variable of feature
-// sets 3 and 13, from ONE feature file (the `clusters` tree written by
+// sets 3, 13 and 7, from ONE feature file (the `clusters` tree written by
 // runPicoDst_ml.C or runMudst_ml.C in mode 0).
 //
 //   root4star -b -q 'qaFeatures.C+("feat_pi0.e30.root","qa_pi0.e30")'
@@ -38,10 +38,25 @@
 //     leak page     cluster centroid per gun particle, the check that must pass
 //                   before feature set 4 (position) can be believed
 //     next page     sigmaMax vs energy with STAR's category boundaries drawn on
+//     eta page      the one input that is READ rather than recomputed: eta,
+//                   all clusters and split by class, eta against radial
+//                   distance from the beam axis, and - the decisive panel -
+//                   eta minus the eta implied by the cluster's stored STAR
+//                   position. That difference is zero if the cluster's
+//                   four-momentum was built from this position about the
+//                   origin, a small offset if it was built about a vertex,
+//                   and enormous if setFourMomentum() was never called and
+//                   pseudoRapidity() returned a sentinel. Skipped when the
+//                   file has no eta branch; the printed tally still says so.
 //     set 3 pages   the linear correlation matrix of the inputs, then every
 //                   variable split by true class (unit area), then every
 //                   variable against cluster energy (all clusters)
 //     set 13 pages  the same for set 13
+//     set 7 pages   the same for set 7. Set 7 is the only set that can be
+//                   PARTLY unavailable: a cluster whose eta fails the sanity
+//                   window keeps its other sets and contributes NaN here,
+//                   which the panels and tables skip, rather than being
+//                   dropped and blanking the whole macro.
 //   <out>.root  every histogram
 //   printed     the per-gun-particle tables (clusters, events, clusters per
 //               event, mean generated energy; and the centroid means and RMS),
@@ -217,6 +232,7 @@ void qaFeatures(const char* infile = "feat_pico.root",
    const int NW = 11;
    Float_t e, x, y, sigmaMin, sigmaMax, theta, xw, yw, truthPurity = 0;
    Float_t eta = -999;  // set 7 only; stays -999 on a file dumped without it
+   Float_t starX = -9999, starY = -9999, starZ = -9999;  // STAR cm, for the eta check
    Float_t img[NW * NW], mask[NW * NW];
    Int_t det = 0, nTowers, nNeighbor = 0, seedRow, seedCol, catStar = 0, truthNPhoton = -1, mcLabel = -1;
    Float_t genE = 0;
@@ -238,6 +254,12 @@ void qaFeatures(const char* infile = "feat_pico.root",
    if (in->GetBranch("det")) in->SetBranchAddress("det", &det);
    if (in->GetBranch("catStar")) in->SetBranchAddress("catStar", &catStar);
    if (in->GetBranch("eta")) in->SetBranchAddress("eta", &eta);
+   // starX/Y/Z let the eta page check eta against the POSITION it should
+   // correspond to - the one test that tells a filled four-momentum from an
+   // empty one. Written by both feature makers; guarded for an older file.
+   if (in->GetBranch("starX")) in->SetBranchAddress("starX", &starX);
+   if (in->GetBranch("starY")) in->SetBranchAddress("starY", &starY);
+   if (in->GetBranch("starZ")) in->SetBranchAddress("starZ", &starZ);
    if (in->GetBranch("truthNPhoton")) in->SetBranchAddress("truthNPhoton", &truthNPhoton);
    if (in->GetBranch("truthPurity")) in->SetBranchAddress("truthPurity", &truthPurity);
    if (in->GetBranch("mcLabel")) in->SetBranchAddress("mcLabel", &mcLabel);
@@ -279,9 +301,12 @@ void qaFeatures(const char* infile = "feat_pico.root",
    printf("energy axes run 0 - %.3g GeV, from %s\n", eTop, eTopFrom);
    const int nEbin = 64;
 
-   // ---------------------------------------------------- the two feature sets
-   const int nSet = 2;
-   const int sets[nSet] = {3, 13};
+   // ------------------------------------------------------- the feature sets
+   // Set 7 is here because it is the only set with a variable the macro
+   // cannot recompute - eta comes from the TREE - so its panels are the only
+   // place a bad eta branch becomes visible.
+   const int nSet = 3;
+   const int sets[nSet] = {3, 13, 7};
    std::vector<float> val[nSet][kNVarMax];  // [set][variable][cluster]
    std::vector<int> cls;                    // class slot of each stored cluster
    std::vector<float> eClu;                 // cluster energy of each stored cluster
@@ -375,8 +400,54 @@ void qaFeatures(const char* infile = "feat_pico.root",
    }
    TH2F* hSigE = new TH2F("hSigE", "sigmaMax vs E, nTowers #geq 5;E [GeV];#sigma_{max} [cells]", nEbin, 0, eTop, 60, 0, 3);
 
+   // ---------------------------------------------------- the eta check
+   // eta is the ONE input variable this macro cannot recompute: every other
+   // one is built here from the tower list, while eta is read from the tree,
+   // where a feature maker put it from the cluster's four-momentum. So it is
+   // also the one variable that can be silently wrong - a four-momentum
+   // nobody called setFourMomentum() on is default-constructed, and
+   // pseudoRapidity() of a null vector returns a sentinel rather than
+   // failing.
+   //
+   // Two things catch that, and they catch different failures.
+   //
+   // The SANITY WINDOW catches the sentinel. A never-filled four-momentum
+   // gives eta = 0 or ~1e10, both outside 1 < eta < 8, so those clusters are
+   // counted in etaTal[2] and kept out of every eta histogram - the tally and
+   // the verdict report them, the plots are not distorted by them.
+   //
+   // hEtaD catches the subtler case: an eta that is filled, and plausible,
+   // but not the quantity it is supposed to be. The cluster's STAR position
+   // is in the tree too, and for a massless four-momentum about the origin
+   //     eta = -ln tan( atan2(sqrt(x^2+y^2), z) / 2 )
+   // holds exactly. So eta - eta(position) is identically zero if the stored
+   // four-momentum was built from this position about the origin; a small
+   // offset if it was built about a measured vertex instead, which matters
+   // because the geometry fallback in the makers assumes the origin; and
+   // visibly wrong otherwise. The printed numbers are exact, so a delta too
+   // large for the histogram range is still reported.
+   TH1F* hEta = new TH1F("hEta", "cluster #eta, all clusters;#eta;clusters", 140, 0, 7);
+   TH1F* hEtaCls[kNCls];
+   for (int k = 0; k < kNCls; k++) {
+      hEtaCls[k] = new TH1F(Form("hEtaCls_%d", k), Form("cluster #eta, %s;#eta;clusters", kQaClsName[k]),
+                            140, 0, 7);
+      hEtaCls[k]->SetLineColor(kQaClsColor[k]);
+   }
+   TH2F* hEtaR = new TH2F("hEtaR", "#eta vs radial distance from the beam axis;r = #sqrt{x^{2}+y^{2}} [cm];#eta",
+                          80, 0, 250, 140, 0, 7);
+   TH1F* hEtaD = new TH1F("hEtaD", "#eta - #eta(position);#eta - #eta(starX,starY,starZ);clusters",
+                          200, -0.5, 0.5);
+   // tallies: 0 total seen, 1 eta == -999 (no branch), 2 eta outside 1..8
+   // (sentinel), 3 usable; and the extremes of the delta
+   Long64_t etaTal[4] = {0, 0, 0, 0};
+   double etaMin = 1e30, etaMax = -1e30, dMax = 0, dSum = 0;
+   Long64_t nD = 0;
+   const bool haveStar = (in->GetBranch("starX") && in->GetBranch("starY") && in->GetBranch("starZ"));
+   const bool haveEta = (in->GetBranch("eta") != 0);
+
    // ---------------------------------------------------------- event loop
    const int half = NW / 2;
+   const float kNaN = sqrt(-1.0f);  // the "set 7 unavailable here" placeholder
    float te[NW * NW], var[kNVarMax];
    int trow[NW * NW], tcol[NW * NW];
    Long64_t nRead = 0, nLowE = 0, nNoFeat[nSet] = {0, 0};
@@ -455,16 +526,28 @@ void qaFeatures(const char* infile = "feat_pico.root",
       c.towerRow = trow;
       c.towerCol = tcol;
 
-      // both sets or neither, so the two sets are drawn from the same clusters
+      // Every set or none, so the sets are drawn from the same clusters - with
+      // ONE exception. Set 7 needs the tree's eta, and compute() refuses an
+      // eta outside 1 < eta < 8, which is what a missing branch (-999) or an
+      // unfilled four-momentum (0, or a ~1e10 sentinel) gives. Letting that
+      // drop the cluster would blank every page of this macro in exactly the
+      // case the macro exists to diagnose. So set 7 alone is allowed to be
+      // unavailable per cluster: its variables become NaN, which every panel
+      // and every table here already skips as non-finite, and the eta page
+      // and the printed tally say how often it happened.
       float v2[nSet][kNVarMax];
       bool ok = true;
       for (int s = 0; s < nSet; s++) {
-         if (compute(sets[s], c, var) != nVar(sets[s])) {
-            nNoFeat[s]++;
-            ok = false;
+         if (compute(sets[s], c, var) == nVar(sets[s])) {
+            for (int k = 0; k < nVar(sets[s]); k++) v2[s][k] = var[k];
             continue;
          }
-         for (int k = 0; k < nVar(sets[s]); k++) v2[s][k] = var[k];
+         nNoFeat[s]++;
+         if (sets[s] == 7 && !(eta > 1.0 && eta < 8.0)) {
+            for (int k = 0; k < nVar(sets[s]); k++) v2[s][k] = kNaN;
+            continue;
+         }
+         ok = false;
       }
       if (!ok) continue;
 
@@ -499,6 +582,32 @@ void qaFeatures(const char* infile = "feat_pico.root",
             gYY[g] += (double)y * y;
          }
       }
+      // ---- the eta check, on every accepted cluster ----
+      etaTal[0]++;
+      if (eta < -100)
+         etaTal[1]++;
+      else if (!(eta > 1.0 && eta < 8.0))
+         etaTal[2]++;
+      else {
+         etaTal[3]++;
+         hEta->Fill(eta);
+         hEtaCls[t]->Fill(eta);
+         if (eta < etaMin) etaMin = eta;
+         if (eta > etaMax) etaMax = eta;
+         if (haveStar && starZ > 1 && (starX > -9000 && starY > -9000)) {
+            const double r = sqrt((double)starX * starX + (double)starY * starY);
+            hEtaR->Fill(r, eta);
+            const double th = atan2(r, (double)starZ);
+            if (th > 1e-9) {
+               const double d = eta - (-log(tan(0.5 * th)));
+               hEtaD->Fill(d);
+               if (fabs(d) > fabs(dMax)) dMax = d;
+               dSum += d;
+               nD++;
+            }
+         }
+      }
+
       hNTow->Fill(nTowers);
       hNNb->Fill(nNeighbor);
       hCat->Fill(catStar);
@@ -507,7 +616,8 @@ void qaFeatures(const char* infile = "feat_pico.root",
    }
    const int nClu = (int)cls.size();
    printf("\n=== qaFeatures: %s ===\n", infile);
-   printf("  %lld clusters read, %lld below %.2f GeV, %d with both feature sets computed", nRead, nLowE, eMin, nClu);
+   printf("  %lld clusters read, %lld below %.2f GeV, %d with the tower-list sets computed",
+          nRead, nLowE, eMin, nClu);
    for (int s = 0; s < nSet; s++)
       if (nNoFeat[s]) printf(", %lld without set %d", nNoFeat[s], sets[s]);
    printf("\n");
@@ -768,6 +878,106 @@ void qaFeatures(const char* infile = "feat_pico.root",
    lc->AddEntry(g1, "below: FCS Cluster category 1", "l");
    lc->Draw();
    cv->Print(pdf);
+
+   // --------------------------------------------- eta page: is eta real?
+   // Only worth a page when the branch is there at all; with no branch the
+   // printed tally says so and set 7's panels are empty by construction.
+   printf("\n  eta, the one input read from the TREE rather than recomputed here\n");
+   printf("    %-28s %10lld\n", "clusters seen", etaTal[0]);
+   printf("    %-28s %10lld\n", "usable (1 < eta < 8)", etaTal[3]);
+   printf("    %-28s %10lld\n", "no eta branch (-999)", etaTal[1]);
+   printf("    %-28s %10lld   <- an unfilled four-momentum\n", "sentinel (outside 1..8)", etaTal[2]);
+   if (etaTal[3] > 0) printf("    range %.3f .. %.3f\n", etaMin, etaMax);
+   if (nD > 0)
+      printf("    eta - eta(position): mean %+.2e, largest %+.2e, over %lld clusters\n",
+             dSum / nD, dMax, nD);
+   else if (haveEta && etaTal[3] > 0)
+      printf("    no starX/Y/Z in this file, so eta cannot be checked against the position\n");
+   // the verdict, in words, because the number alone is easy to misread
+   if (!haveEta || etaTal[1] == etaTal[0])
+      printf("    VERDICT: no eta in this file - set 7 cannot be trained from it, and\n"
+             "      trainTMVA.C will stop with an empty tree rather than fit the default\n");
+   else if (etaTal[2] > 0)
+      printf("    VERDICT: %lld cluster(s) carry a sentinel eta - the four-momentum they came\n"
+             "      from was never filled. Those clusters cannot enter set 7\n", etaTal[2]);
+   else if (nD > 0 && fabs(dMax) < 1e-3)
+      printf("    VERDICT: eta agrees with the stored position about the origin to %.0e - the\n"
+             "      four-momentum is filled, and set 7 can be trained from this file\n", fabs(dMax));
+   else if (nD > 0 && fabs(dMax) < 0.1)
+      printf("    VERDICT: eta is filled but offset from the origin by up to %.3f - built about\n"
+             "      a vertex rather than (0,0,0). Fine as an input, but it is NOT the same\n"
+             "      quantity the geometry fallback would produce\n", fabs(dMax));
+   else if (nD > 0)
+      printf("    VERDICT: eta does NOT correspond to the stored position (up to %+.3f) - do not\n"
+             "      train set 7 on this file until that is understood\n", dMax);
+   if (etaTal[3] > 0 && (etaMin < 2.0 || etaMax > 5.0))
+      printf("    NOTE: the FCS ECal covers roughly 2.5 < eta < 4.2; this file runs %.2f .. %.2f\n",
+             etaMin, etaMax);
+
+   if (haveEta && etaTal[3] > 0) {
+      cv->Clear();
+      cv->Divide(2, 2);
+
+      cv->cd(1);
+      gPad->SetLogy(0);
+      hEta->Draw("hist");
+      keep.push_back(hEta);
+
+      cv->cd(2);
+      gPad->SetLogy(0);
+      TH1F* etaOv[kNCls];
+      for (int k = 0; k < kNCls; k++) {
+         // a CLONE, so the overlay carries its own title and range instead of
+         // inheriting class 0's, and so the per-class histograms written to
+         // the .root file are not left rescaled to unit area
+         etaOv[k] = (TH1F*)hEtaCls[k]->Clone(Form("hEtaClsOv_%d", k));
+         etaOv[k]->SetTitle("cluster #eta by true class, unit area;#eta;fraction");
+         keep.push_back(etaOv[k]);
+      }
+      drawOverlay(etaOv, kNCls);
+      TLegend* le = new TLegend(0.62, 0.68, 0.88, 0.88);
+      le->SetFillStyle(0);
+      le->SetBorderSize(0);
+      for (int k = 0; k < kNCls; k++)
+         if (etaOv[k]->Integral() > 0) le->AddEntry(etaOv[k], kQaClsName[k], "l");
+      le->Draw();
+
+      cv->cd(3);
+      gPad->SetLogy(0);
+      gPad->SetLogz(1);
+      gPad->SetRightMargin(0.12);
+      if (nD > 0) {
+         hEtaR->Draw("colz");
+      } else {
+         gPad->Clear();
+         TLatex nn;
+         nn.SetNDC();
+         nn.SetTextSize(0.045);
+         nn.DrawLatex(0.08, 0.55, "no starX/Y/Z branches in this file,");
+         nn.DrawLatex(0.08, 0.47, "so #eta cannot be checked against the position");
+      }
+      keep.push_back(hEtaR);
+
+      cv->cd(4);
+      gPad->SetLogy(1);
+      hEtaD->Draw("hist");
+      keep.push_back(hEtaD);
+      TLatex vt;
+      vt.SetNDC();
+      vt.SetTextSize(0.038);
+      if (nD > 0) {
+         vt.DrawLatex(0.13, 0.86, Form("mean %+.2e, largest %+.2e", dSum / nD, dMax));
+         vt.DrawLatex(0.13, 0.80,
+                      fabs(dMax) < 1e-3 ? "#rightarrow built from this position about the origin"
+                      : fabs(dMax) < 0.1 ? "#rightarrow filled, but about a vertex, not the origin"
+                                         : "#rightarrow does NOT match the position");
+      } else {
+         vt.DrawLatex(0.13, 0.86, "no position branches to compare against");
+      }
+      if (etaTal[2] > 0)
+         vt.DrawLatex(0.13, 0.74, Form("%lld cluster(s) with a sentinel #eta, excluded", etaTal[2]));
+      cv->Print(pdf);
+   }
 
    // ------------------------------------------------------- per set
    for (int s = 0; s < nSet; s++) {

@@ -271,14 +271,50 @@ Before training on a new sample, look at every variable the model will see:
 
 It dumps the features (`runMudst_ml.C` as simulation, or `runPicoDst_ml.C`,
 chosen from the file name; skipped if `feat_<name>.root` already exists) and runs
-`qaFeatures.C`, which computes sets 3 and 13 with the same `StFcsClusterFeatures.h`
-the training uses. `qa_<name>.pdf` holds:
+`qaFeatures.C`, which computes sets 3, 13 and 7 with the same
+`StFcsClusterFeatures.h` the training uses. `qa_<name>.pdf` holds:
 
 - page 1: cluster energy, generated energy, north/south centroid maps, nTowers,
   nNeighbor, the FCS Cluster category, the true class;
 - page 2: σ_max vs E with STAR's two category boundaries drawn on;
+- **the eta page** — see below;
 - per set: every variable split by true class (unit area, all clusters dashed),
   then every variable against cluster energy.
+
+### The eta page — the one input that is read, not recomputed
+
+Every other variable in every set is rebuilt here from the tower list, so it
+cannot disagree with what the training sees. `eta` is different: it is **read
+from the tree**, where a feature maker put it from the cluster's four-momentum
+(section *The cluster four-momentum*). That makes it the one input that can be
+silently wrong, and the failure is quiet — a four-momentum nobody called
+`setFourMomentum()` on is default-constructed, and `pseudoRapidity()` of a null
+vector returns a sentinel rather than failing.
+
+Two checks, for two different failures:
+
+- **the sanity window** catches the sentinel. `compute()` refuses set 7 outside
+  `1 < eta < 8`, so a 0 or a ~1e10 is counted and excluded rather than fitted.
+- **`eta` − `eta(position)`** catches an eta that is filled and plausible but
+  not the right quantity. `starX/Y/Z` are in the tree too, and for a massless
+  four-momentum about the origin
+  `eta = -ln tan(atan2(sqrt(x²+y²), z)/2)` holds exactly — so this difference
+  is **identically zero** if the four-momentum was built from this position
+  about the origin, a **small offset** if it was built about a measured vertex
+  (which matters, because the makers' geometry fallback assumes the origin),
+  and visibly wrong otherwise.
+
+The log prints the tally, the range, the mean and largest difference, and a
+one-line **VERDICT** saying which of those cases the file is in. Read that line
+before training set 7 on a new sample.
+
+**Set 7 is also the only set allowed to be partly unavailable.** The others are
+all-or-nothing per cluster, so that their panels are drawn from identical
+clusters. If set 7 were held to that, a bad `eta` branch would drop every
+cluster and blank the whole macro — in exactly the case the macro exists to
+diagnose. So a cluster whose eta fails the window keeps its other sets and
+contributes `NaN` to set 7, which the panels, the correlation matrix and the
+tables already skip as non-finite.
 
 The energy axes end at the gun energy taken from the file name — the `e60` in
 `pi0.e60.vz0.all.picoDst.root` (and in the `feat_...` file made from it) gives a
