@@ -330,6 +330,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
 
    const int NW = 11;
    Float_t e, x, y, sigmaMin, sigmaMax, theta, xw, yw, truthPurity, mcSepCell = -1;
+   Float_t eta = -999;  // set 7 only; stays -999 on a file dumped without it
    Float_t img[NW * NW], mask[NW * NW];
    Int_t run = 0, event = 0, nTowers, nNeighbor = 0, seedRow, seedCol, catStar, truthNPhoton, mcLabel = -1;
    in->SetBranchAddress("run", &run);
@@ -354,6 +355,10 @@ void evalCategory(const char* infile = "feat_pico_all.root",
    if (in->GetBranch("mcLabel")) in->SetBranchAddress("mcLabel", &mcLabel);
    const bool haveSep = (in->GetBranch("mcSepCell") != 0);
    if (haveSep) in->SetBranchAddress("mcSepCell", &mcSepCell);
+   // set 7 needs the cluster pseudorapidity, which only the feature makers can
+   // compute; a file dumped before that branch existed leaves it at -999 and
+   // compute() then refuses set 7 rather than training on the sentinel
+   if (in->GetBranch("eta")) in->SetBranchAddress("eta", &eta);
    // which sample each cluster came from - written by the dumpers since the
    // per-particle view was added; older feature files do not have it
    Int_t genPid = 0;
@@ -599,6 +604,7 @@ void evalCategory(const char* infile = "feat_pico_all.root",
       c.sigmaMin = sigmaMin;
       c.sigmaMax = sigmaMax;
       c.theta = theta;
+      c.eta = eta;
       c.nTowers = nTowers;
       c.nNeighbor = nNeighbor;
       c.xw = xw;

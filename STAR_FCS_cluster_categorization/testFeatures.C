@@ -77,6 +77,7 @@ ClusterInput toInput(const Fake& f) {
    c.sigmaMin = 0.8;  // stand-ins: StFcsClusterMaker fills these for real clusters
    c.sigmaMax = 1.5;
    c.theta = 0.0;
+   c.eta = 3.4;  // inside the FCS acceptance; set 7 refuses the -999 default
    c.nTowers = f.nTow;
    c.nNeighbor = 0;
    c.xw = XW;

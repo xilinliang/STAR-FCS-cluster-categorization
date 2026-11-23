@@ -17,6 +17,7 @@
 #include "StEvent/StFcsCollection.h"
 #include "StEvent/StFcsHit.h"
 #include "StEventTypes.h"
+#include "StThreeVectorF.hh"
 #include "StFcsDbMaker/StFcsDb.h"
 #include "StMessMgr.h"
 #include "Stypes.h"
@@ -94,6 +95,19 @@ int StFcsMLCategoryMaker::features(StFcsCluster* clu, StFcsDb* db, int set, floa
    c.sigmaMin = clu->sigmaMin();
    c.sigmaMax = clu->sigmaMax();
    c.theta = clu->theta();
+   // CLUSTER PSEUDORAPIDITY, for feature set 7, by the same two calls
+   // StFcsClusterFeatureMaker makes to fill the tree's eta branch - the
+   // centroid is in column/row units, so the geometry turns it into a STAR
+   // position and getLorentzVector makes the massless four-momentum that
+   // points at it. Using the identical call is the point: an eta computed any
+   // other way here would not be the variable the model was trained on. The
+   // angle is about the origin, the vertex only for a vz = 0 sample.
+   // compute() refuses set 7 if this stays at -999.
+   c.eta = -999.0f;
+   if (db) {
+      const StThreeVectorD xyz = db->getStarXYZfromColumnRow(det, c.x, c.y);
+      c.eta = db->getLorentzVector(xyz, c.e, 0.0).pseudoRapidity();
+   }
    c.nTowers = clu->nTowers();
    c.nNeighbor = clu->nNeighbor();
    c.xw = db->getXWidth(det);

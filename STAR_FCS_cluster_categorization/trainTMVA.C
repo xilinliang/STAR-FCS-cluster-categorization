@@ -27,7 +27,7 @@
 // The input variables come from StFcsClusterFeatures.h - the same header the
 // inference maker uses - so training and application cannot drift apart.
 //
-// Feature sets: 3, 4, 6, 10, 12, 13 or 34. Set 3 is the 3x3 one - the id names the
+// Feature sets: 3, 4, 6, 7, 10, 12, 13 or 34. Set 3 is the 3x3 one - the id names the
 // window, not the variable count, and it has 13 variables. It is the good
 // starting point: raw tower energies plus E, sigmaMax, sigmaMin and E1/E, with
 // none of the correlated derived triplets of set 13.
@@ -157,7 +157,7 @@
 
 void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
                const char* jobname = "FcsCat",
-               int featureSet = 13,          // 3,4,6,10,12,13,34 - see the note above
+               int featureSet = 13,          // 3,4,6,7,10,12,13,34 - see the note above
                const char* treename = "clusters",
                float purityCut = 0.8,
                float eMin = 0.5,
@@ -186,6 +186,7 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
 
    const int NW = 11;  // StFcsClusterFeatureMaker::kNW
    Float_t e, x, y, sigmaMin, sigmaMax, theta, xw, yw, truthPurity;
+   Float_t eta = -999;  // set 7 only; stays -999 on a file dumped without it
    Float_t img[NW * NW], mask[NW * NW];
    Int_t nTowers, nNeighbor, seedRow, seedCol, catStar, truthNPhoton, mcLabel;
    Int_t run = 0, event = 0;
@@ -211,6 +212,7 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
    mcLabel = -1;
    if (in->GetBranch("mcLabel")) in->SetBranchAddress("mcLabel", &mcLabel);
    in->SetBranchAddress("truthPurity", &truthPurity);
+   if (in->GetBranch("eta")) in->SetBranchAddress("eta", &eta);
    Int_t genPid = 0;
    if (in->GetBranch("genPid")) {
       in->SetBranchAddress("genPid", &genPid);
@@ -367,6 +369,7 @@ void trainTMVA(const char* infile = "fcsEcalClusterFeatures.root",
       c.sigmaMin = sigmaMin;
       c.sigmaMax = sigmaMax;
       c.theta = theta;
+      c.eta = eta;
       c.nTowers = nTowers;
       c.nNeighbor = nNeighbor;
       c.xw = xw;

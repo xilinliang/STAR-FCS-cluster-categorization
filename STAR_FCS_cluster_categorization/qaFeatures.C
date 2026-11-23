@@ -216,6 +216,7 @@ void qaFeatures(const char* infile = "feat_pico.root",
 
    const int NW = 11;
    Float_t e, x, y, sigmaMin, sigmaMax, theta, xw, yw, truthPurity = 0;
+   Float_t eta = -999;  // set 7 only; stays -999 on a file dumped without it
    Float_t img[NW * NW], mask[NW * NW];
    Int_t det = 0, nTowers, nNeighbor = 0, seedRow, seedCol, catStar = 0, truthNPhoton = -1, mcLabel = -1;
    Float_t genE = 0;
@@ -236,6 +237,7 @@ void qaFeatures(const char* infile = "feat_pico.root",
    in->SetBranchAddress("seedCol", &seedCol);
    if (in->GetBranch("det")) in->SetBranchAddress("det", &det);
    if (in->GetBranch("catStar")) in->SetBranchAddress("catStar", &catStar);
+   if (in->GetBranch("eta")) in->SetBranchAddress("eta", &eta);
    if (in->GetBranch("truthNPhoton")) in->SetBranchAddress("truthNPhoton", &truthNPhoton);
    if (in->GetBranch("truthPurity")) in->SetBranchAddress("truthPurity", &truthPurity);
    if (in->GetBranch("mcLabel")) in->SetBranchAddress("mcLabel", &mcLabel);
@@ -443,6 +445,7 @@ void qaFeatures(const char* infile = "feat_pico.root",
       c.sigmaMin = sigmaMin;
       c.sigmaMax = sigmaMax;
       c.theta = theta;
+      c.eta = eta;
       c.nTowers = nTowers;
       c.nNeighbor = nNeighbor;
       c.xw = xw;

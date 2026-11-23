@@ -127,6 +127,7 @@ const double kW0 = 4.5;
 inline int nVar(int set) {
    if (set == 34) return 34;
    if (set == 6) return 6;
+   if (set == 7) return 7;    // ePIC-style scalars + cluster pseudorapidity
    if (set == 12) return 12;  // set 13 minus nNeighbor
    if (set == 10) return 10;  // set 13 minus sigX, sigY, sigXY
    if (set == 4) return 15;   // set 3 plus the cluster position x, y
@@ -140,6 +141,20 @@ inline const char** varNames(int set) {
    // cluster's tower list is not stored. Train on MuDst with set 6 and the
    // model applies unchanged to picoDst input.
    static const char* n6[6] = {"logE", "nTowers", "sigmaMax", "sigmaMin", "sigmaRatio", "theta"};
+   // set 7: the ePIC-style scalar block - the first eight of set 34 without
+   // the centroid x, y - with the cluster PSEUDORAPIDITY in their place.
+   // nHits is nTowers, and radius and dispersion carry exactly the set-34
+   // definitions (energy-weighted and log-weighted RMS radius), so a set-7
+   // number can be compared with a set-34 one directly.
+   //
+   // eta is the only variable in any set that the feature TREE must supply
+   // rather than the tower list: it needs StFcsDb geometry to turn the
+   // column/row centroid into a STAR position, so the feature makers compute
+   // it and write an "eta" branch. A file dumped before that branch existed
+   // cannot train set 7 - compute() returns 0 for every cluster and
+   // trainTMVA.C stops with an empty tree rather than training on -999.
+   static const char* n7[7] = {"e",          "eta",      "nHits", "radius",
+                               "dispersion", "sigmaMin", "sigmaMax"};
    // set 3: the raw 3x3 shower shape plus the four scalars that the 3x3 alone
    // cannot supply (absolute scale, and the rotation-invariant widths)
    static const char* n3[13] = {"e",   "sigmaMax", "sigmaMin", "seedFrac",
@@ -184,6 +199,7 @@ inline const char** varNames(int set) {
                                  "eOut"};
    if (set == 34) return n34;
    if (set == 6) return n6;
+   if (set == 7) return n7;
    if (set == 12) return n12;
    if (set == 10) return n10;
    if (set == 4) return n4;
@@ -206,6 +222,7 @@ struct ClusterInput {
    float sigmaMin;
    float sigmaMax;
    float theta;
+   float eta;    // cluster pseudorapidity; set 7 only, -999 when unknown
    int nTowers;
    int nNeighbor;
    float xw;
@@ -214,6 +231,11 @@ struct ClusterInput {
    const float* towerE;   // tower energies    [nTow]
    const int* towerRow;   // tower row index   [nTow]
    const int* towerCol;   // tower column index[nTow]
+
+   // eta defaults to "unknown" so that a caller which does not set it makes
+   // compute() refuse set 7 rather than train on a sentinel. Every other
+   // field is set by every caller, as before.
+   ClusterInput() : eta(-999.0f) {}
 };
 
 // Fills out[0..nVar(set)-1]. Returns the number of variables written, or 0 if
@@ -290,7 +312,7 @@ inline int compute(int set, const ClusterInput& c, float* out) {
       return 13;
    }
 
-   if (set != 34) {
+   if (set != 34 && set != 7) {
       // ----------------------------------------------------------- 13 / 10
       // The three sets share every definition. Set 10 stops before the
       // detector-frame moments and puts nNeighbor in their place; set 12 keeps
@@ -343,7 +365,11 @@ inline int compute(int set, const ClusterInput& c, float* out) {
       return 13;
    }
 
-   // ------------------------------------------------------------------ 34
+   // ------------------------------------------------------------- 7 / 34
+   // Both need the energy-weighted and log-weighted radii, so they share the
+   // tower loop; only set 34 also needs the 5x5 grid and the leakage term.
+   const bool want34 = (set == 34);
+   if (!want34 && c.eta < -100) return 0;  // no eta branch in this file
    int seedRow = 0, seedCol = 0;
    double emax = -1;
    for (int k = 0; k < c.nTow; k++) {
@@ -372,6 +398,7 @@ inline int compute(int set, const ClusterInput& c, float* out) {
          lwr2 += lw * d2;
       }
 
+      if (!want34) continue;
       const int dr = c.towerRow[k] - seedRow;
       const int dc = c.towerCol[k] - seedCol;
       if (abs(dr) <= half && abs(dc) <= half) {
@@ -380,6 +407,18 @@ inline int compute(int set, const ClusterInput& c, float* out) {
       }
    }
    if (wtot <= 0) return 0;
+
+   if (!want34) {
+      // ---------------------------------------------------------------- 7
+      out[0] = c.e;
+      out[1] = c.eta;
+      out[2] = c.nTowers;
+      out[3] = sqrt(wr2 / wtot);
+      out[4] = (lwtot > 0) ? sqrt(lwr2 / lwtot) : 0.0;
+      out[5] = c.sigmaMin;
+      out[6] = c.sigmaMax;
+      return 7;
+   }
 
    out[0] = c.e;
    out[1] = c.x;

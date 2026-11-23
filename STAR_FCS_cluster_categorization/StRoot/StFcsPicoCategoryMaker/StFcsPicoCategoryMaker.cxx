@@ -189,6 +189,14 @@ int StFcsPicoCategoryMaker::evaluate(StPicoFcsCluster* clu, int nTow, const floa
    c.sigmaMin = clu->sigmaMin();
    c.sigmaMax = clu->sigmaMax();
    c.theta = clu->theta();
+   // CLUSTER PSEUDORAPIDITY, for feature set 7, from the cluster's own four-
+   // momentum - the same call StFcsPicoFeatureMaker makes to fill the tree's
+   // eta branch. Using the identical call is the point: an eta computed any
+   // other way here would not be the variable the model was trained on.
+   // StPicoFcsCluster carries the four-momentum already, so unlike the
+   // StEvent path this needs no geometry lookup. It is about the origin,
+   // which is the vertex only for a vz = 0 sample.
+   c.eta = clu->fourMomentum().Eta();
    c.nTowers = clu->nTowers();
    // Not stored in picoDst - recomputed from the tower adjacency by
    // StFcsTowerAssoc::neighborCounts, so that set 13 sees the same variable here

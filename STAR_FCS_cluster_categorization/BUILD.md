@@ -650,6 +650,108 @@ together through `LABELDEF`, and the evaluation always follows the training:
 env LABELDEF=2 ./runTrainAll.sh 80GeV gamma.e80...root pi0.e80...root pi-.e80...root
 ```
 
+### The cluster four-momentum — already there, on both paths
+
+Nothing needs to be added to get a cluster's four-momentum. Both input paths
+build one, by different routes, and both write its components to the feature
+tree.
+
+**picoDst.** `StPicoFcsCluster` carries its own four-momentum:
+
+```cpp
+const TLorentzVector p4 = clu->fourMomentum();
+bPt = p4.Pt();  bEta = p4.Eta();  bPhi = p4.Phi();
+```
+
+**StEvent / MuDst.** `StFcsCluster` stores the centroid in column/row units, so
+the geometry has to place it first, and then the four-momentum is built
+massless along that direction:
+
+```cpp
+StThreeVectorD xyz = mFcsDb->getStarXYZfromColumnRow(det, bX, bY);
+StLorentzVectorD p4 = mFcsDb->getLorentzVector(xyz, bE, 0.0);
+bEta = p4.pseudoRapidity();  bPhi = p4.phi();  bPt = p4.perp();
+```
+
+Either way the feature tree gets **`starX`, `starY`, `starZ`, `pt`, `eta`,
+`phi`** beside `e`, `x`, `y`. The mass argument is 0 because a calorimeter
+cluster has no measured mass — the energy and the direction are all there is,
+so the four-momentum is `(E, E·n̂)`.
+
+**Two clusters give an invariant mass**, and `StFcsPicoCategoryMaker` already
+does this for the π⁰ candidate pairs:
+
+```cpp
+const float zgg = fabs(ei - ej) / (ei + ej);
+if (zgg > mZggMax) continue;
+const TLorentzVector pi = ci->fourMomentum();
+const TLorentzVector pj = cj->fourMomentum();
+const float m   = (pi + pj).M();
+const float ang = pi.Vect().Angle(pj.Vect());
+```
+
+**The caveat on both paths: the angle is about the origin, not the vertex.**
+`getLorentzVector(xyz, e, 0)` points from (0,0,0) at the shower position, and
+`StPicoFcsCluster::fourMomentum()` does the same. For the `vz0` samples used
+here the origin *is* the vertex, so eta, pt and any two-cluster mass are
+correct. On data, or on a sample with a spread vertex, they are not — the
+direction has to be taken from the measured vertex to the shower position
+instead. Fix before any application to data.
+
+### Feature set 7 — the ePIC scalar block with cluster pseudorapidity
+
+```
+e   eta   nHits   radius   dispersion   sigmaMin   sigmaMax
+```
+
+Six of the seven already existed as the first eight of set 34 minus the
+centroid, and they carry **exactly** the set-34 definitions — `nHits` is
+`nTowers`, `radius` is the energy-weighted RMS radius, `dispersion` the
+log-weighted one — so a set-7 number can be compared with a set-34 one
+directly. `testFeatures.C` asserts that equality rather than trusting it.
+
+**`eta` is the only variable in any set that the feature TREE has to supply.**
+Every other variable is computed from the cluster and its tower list;
+pseudorapidity needs the geometry, because the centroid is stored in column/row
+units.
+
+**It was already there.** Both feature makers have written an `eta` branch
+since the start — `StFcsClusterFeatureMaker` from the initial commit,
+`StFcsPicoFeatureMaker` from `7d0ae46` — filled from the cluster's
+four-momentum beside `phi`, `pt` and `starX/Y/Z`. So **set 7 needs no re-dump
+and no rebuild to train**: every existing `feat_*.root` already carries it.
+(The first version of this section claimed the opposite, and the commit that
+added set 7 declared a duplicate `bEta` in both makers trying to add a branch
+that existed — which would not have compiled. Reverted; the makers are
+untouched by set 7.)
+
+`trainTMVA.C`, `evalCategory.C` and `qaFeatures.C` guard the read with
+`if (in->GetBranch("eta"))` and leave the variable at −999 otherwise, and
+`compute()` refuses set 7 on a −999 — so a file that somehow lacks the branch
+stops training with an empty tree rather than fitting the sentinel.
+
+A **rebuild is still needed to APPLY** a set-7 model in `setMode(1)`, because
+the two appliers did change: each now fills `c.eta` with the same call its
+feature maker uses — `getLorentzVector(getStarXYZfromColumnRow(det,x,y), e, 0)
+.pseudoRapidity()` on the StEvent path, `clu->fourMomentum().Eta()` on the pico
+path, where the cluster carries its own four-momentum. Matching the call
+exactly is the point: an eta computed a different way at apply time would not
+be the variable the model was trained on.
+
+The angle is taken about the origin. For these `vz0` samples that *is* the
+vertex; with a displaced vertex it would be the cluster's eta about (0,0,0)
+rather than about the interaction point, which is worth fixing before anything
+is applied to data.
+
+**What to expect from it.** Set 4 was set 3 plus the centroid `x`, `y`, and it
+was tested and rejected — under 0.5 % change in every class. Eta is a
+reparametrisation of the same information (radial distance from the beam axis),
+so the set-4 result predicts it will add little for classification. Where it
+could earn its place is as a shape *calibrator*: incidence angle varies across
+the acceptance and shower width varies with it, so eta may help the other six
+variables rather than separate the classes itself. The ranking will say which —
+if `eta` lands near `sigXY` at the bottom, that is the set-4 result repeating.
+
 ### Which variables matter - and one that matters too much
 
 TMVA prints a ranking per method during training; `grep -A 20 'Ranking result'
